@@ -1,4 +1,4 @@
-import { AgentMemory, type BlockSummarizer, type EventExtractor } from '../src/index.js';
+import { StrataGate, type BlockSummarizer, type EventExtractor } from '../src/index.js';
 
 const summarize: BlockSummarizer = async (messages) => ({
   l0Title: 'API design discussion',
@@ -21,7 +21,7 @@ const extract: EventExtractor = async ({ target }) => ({
   }],
 });
 
-const memory = new AgentMemory({ blockTurnSize: 1, summarizer: summarize, extractor: extract });
+const memory = new StrataGate({ blockTurnSize: 1, summarizer: summarize, extractor: extract });
 
 await memory.appendTurn({
   user: 'Let us use cursor pagination for the public API.',

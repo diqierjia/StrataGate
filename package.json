@@ -1,7 +1,7 @@
 {
-  "name": "@diqier/agentmemory",
+  "name": "@diqier/stratagate",
   "version": "0.1.0",
-  "description": "Evidence-gated, source-preserving memory for long-running AI agents.",
+  "description": "Recent conversations stay verbatim. Older ones become an index. Answers wait for enough evidence.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,6 +25,8 @@
   },
   "keywords": [
     "agent-memory",
+    "layered-memory",
+    "evidence-gate",
     "long-term-memory",
     "llm",
     "ai-agents",
@@ -33,12 +35,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/diqierjia/AgentMemory.git"
+    "url": "git+https://github.com/diqierjia/StrataGate.git"
   },
   "bugs": {
-    "url": "https://github.com/diqierjia/AgentMemory/issues"
+    "url": "https://github.com/diqierjia/StrataGate/issues"
   },
-  "homepage": "https://github.com/diqierjia/AgentMemory#readme",
+  "homepage": "https://github.com/diqierjia/StrataGate#readme",
   "license": "MIT",
   "engines": {
     "node": ">=20"

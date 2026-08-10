@@ -52,7 +52,7 @@ This run reused a previously extracted memory state. It was not an end-to-end So
 
 ### Judge sensitivity
 
-At least one fixed answer received opposite judgments under two judge models: 10 / 10 correct with the mini judge and 0 / 10 with the Sol judge. This is why AgentMemory does not treat judge changes as memory-quality changes.
+At least one fixed answer received opposite judgments under two judge models: 10 / 10 correct with the mini judge and 0 / 10 with the Sol judge. This is why StrataGate does not treat judge changes as memory-quality changes.
 
 ## Excluded result
 

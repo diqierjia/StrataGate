@@ -22,7 +22,7 @@ import type {
 } from './types.js';
 import { criticalityFloor, memoryWeightAt } from './weights.js';
 
-export interface AgentMemoryOptions {
+export interface StrataGateOptions {
   blockTurnSize?: number;
   summarizer?: BlockSummarizer;
   extractor?: EventExtractor;
@@ -89,7 +89,7 @@ function renderBlock(block: MemoryBlock, level: BlockLevel): string {
   return block.l5Raw.map((message) => `${message.role}: ${message.content}`).join('\n\n');
 }
 
-export class AgentMemory {
+export class StrataGate {
   readonly blockTurnSize: number;
 
   private readonly summarizer: BlockSummarizer | undefined;
@@ -102,7 +102,7 @@ export class AgentMemory {
   private readonly extractedBlockIds = new Set<string>();
   private currentTurn = 0;
 
-  constructor(options: AgentMemoryOptions = {}) {
+  constructor(options: StrataGateOptions = {}) {
     this.blockTurnSize = Math.max(1, Math.floor(options.blockTurnSize ?? DEFAULT_BLOCK_TURN_SIZE));
     this.summarizer = options.summarizer;
     this.extractor = options.extractor;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentMemory, memoryWeightAt, type BlockSummarizer, type EventExtractor } from '../src/index.js';
+import { StrataGate, memoryWeightAt, type BlockSummarizer, type EventExtractor } from '../src/index.js';
 
 function ids(): (prefix: 'msg' | 'blk' | 'evt') => string {
   let value = 0;
@@ -29,9 +29,9 @@ const extractor: EventExtractor = async ({ target }) => ({
   }],
 });
 
-describe('AgentMemory lifecycle', () => {
+describe('StrataGate lifecycle', () => {
   it('seals blocks, delays extraction, searches, and records adoption separately', async () => {
-    const memory = new AgentMemory({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
+    const memory = new StrataGate({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
     const first = await memory.appendTurn({ user: 'Please keep answers concise.', assistant: 'Understood.' });
     expect(first.sealedBlock).not.toBeNull();
     expect(first.extractedEvents).toHaveLength(0);
@@ -53,7 +53,7 @@ describe('AgentMemory lifecycle', () => {
   });
 
   it('keeps forgotten events out of search without deleting their provenance', async () => {
-    const memory = new AgentMemory({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
+    const memory = new StrataGate({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
     await memory.appendTurn({ user: 'Please keep answers concise.', assistant: 'Understood.' });
     await memory.appendTurn({ user: 'What did I ask?', assistant: 'Let me check.' });
     const event = memory.listEvents()[0];

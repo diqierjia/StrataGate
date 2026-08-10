@@ -1,6 +1,6 @@
-# AgentMemory architecture
+# StrataGate architecture
 
-AgentMemory separates source preservation, derived memory, retrieval control, and reinforcement. Combining these responsibilities makes it easy for a summary mistake or a ranking feedback loop to become an apparently certain answer.
+StrataGate separates source preservation, derived memory, retrieval control, and reinforcement. Combining these responsibilities makes it easy for a summary mistake or a ranking feedback loop to become an apparently certain answer.
 
 ## System boundaries
 
