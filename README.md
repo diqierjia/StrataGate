@@ -262,10 +262,6 @@ benchmarks/       machine-readable development-run summaries
 5. Retrieval should not reinforce itself.
 6. Benchmark configuration is part of the result.
 
-## Contributing
-
-Issues and focused pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Changes to memory semantics should include a failing test or a small reproducible case that explains the invariant being changed.
-
 ## License
 
 AgentMemory is available under the [MIT License](LICENSE).

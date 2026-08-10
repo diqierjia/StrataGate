@@ -161,10 +161,6 @@ L3 只删除范围明确的冗余：独立寒暄、纯确认、工具参数原�
 5. 检索不能自动强化自身。
 6. 实验配置也是实验结果的一部分。
 
-## 参与贡献
-
-欢迎提交问题和范围清晰的 Pull Request。修改记忆语义时，请同时提供失败测试或可复现的小案例。具体见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
 ## 许可证
 
 AgentMemory 使用 [MIT License](LICENSE)。
