@@ -1,6 +1,6 @@
 <div align="center">
 
-# StrataGate
+# 🧠 StrataGate
 
 ### Recent conversations stay verbatim. Older ones become an index. Answers wait for enough evidence.
 
@@ -14,7 +14,7 @@
 
 StrataGate is a memory system for AI agents. It is built around two simple rules.
 
-## 1. Memory should get lighter with distance, not disappear
+## 🪶 1. Memory should get lighter with distance, not disappear
 
 ```text
 Just happened                                              Long ago
@@ -27,7 +27,7 @@ StrataGate seals every 12 completed conversation turns into one permanent block.
 
 The result is small everyday context without throwing old conversations away.
 
-## 2. Finding something is not the same as having an answer
+## 🚦 2. Finding something is not the same as having an answer
 
 After every search, StrataGate asks one plain question: **is the newest evidence enough?**
 
@@ -41,7 +41,7 @@ Only the first path opens the answer gate. If the search budget ends while evide
 
 These two rules are the heart of StrataGate: **memory has depth, and answers have a gate.**
 
-## Why this exists
+## 💡 Why this exists
 
 Most long-running assistants choose one of two bad compromises:
 
@@ -50,7 +50,7 @@ Most long-running assistants choose one of two bad compromises:
 
 StrataGate keeps the source and the smaller views together. The agent sees only the detail it needs now and can move back down to the original words later.
 
-## What happens to one conversation
+## 🧱 What happens to one conversation
 
 A user message and its assistant reply count as one turn. After 12 completed turns, StrataGate creates one block with six views of the same conversation:
 
@@ -69,7 +69,7 @@ Older blocks normally show a shallower view. Opening a block lifts only that blo
 
 > Twelve turns is the current tested default, not a claim that 12 is universally optimal. A 6/12/24-turn comparison has not been completed yet.
 
-## What happens before an answer
+## 🔎 What happens before an answer
 
 The agent searches in small steps. After each new result, it records five short fields:
 
@@ -87,7 +87,7 @@ In everyday language:
 
 A result can pass only when it is marked `sufficient`, cites evidence from the newest search batch, and chooses `answer` as the next step.
 
-## Quick start
+## 🚀 Quick start
 
 StrataGate currently ships as a TypeScript core library. Node.js 20+ is required.
 
@@ -157,7 +157,7 @@ if (check.verdict === 'sufficient') {
 
 The core owns the memory rules. Applications provide the model calls through two small interfaces: one that creates the short block views and one that extracts lasting events. No model provider is built into the core.
 
-## The whole flow
+## 🔄 The whole flow
 
 ```mermaid
 flowchart LR
@@ -176,19 +176,19 @@ flowchart LR
     N --> G
 ```
 
-## Helpful memory around those two rules
+## 🗂️ Helpful memory around those two rules
 
 StrataGate also keeps searchable event cards for decisions, preferences, plans, and corrections. Each card points to its source block and messages. Event time and message time are stored separately so a question about when something happened is not answered with the date it was mentioned.
 
 These are supporting abilities. The main design remains the changing depth of old conversation and the evidence check before answering.
 
-## Search should not make itself stronger
+## ⚖️ Search should not make itself stronger
 
 Simply finding a memory does not increase its long-term weight. A memory becomes stronger only after the answer actually uses it. This avoids a loop where frequently returned memories keep winning future searches merely because they were returned before.
 
 Corrections also keep their history. A newer event can replace an older one without deleting the old source. A forgotten event leaves search but keeps its record unless an application explicitly deletes it.
 
-## Evaluation: a development record, not a leaderboard
+## 📊 Evaluation: a development record, not a leaderboard
 
 The completed sequence below used one LoCoMo conversation (`conv-26`): 419 messages, 35 sessions, and 152 category 1-4 questions. Extraction used `gpt-4o-mini`; answering and judging used `gpt-4o`.
 
@@ -206,7 +206,7 @@ The failed fifth run matters: it is the reason the evidence gate stays small and
 
 Different model and judge experiments are kept in [Evaluation](docs/EVALUATION.md), with their limits stated next to the numbers instead of mixing them into this improvement curve.
 
-## What is ready today
+## ✅ What is ready today
 
 - permanent conversation blocks and six levels of detail;
 - deterministic L3-L5 views;
@@ -217,7 +217,7 @@ Different model and judge experiments are kept in [Evaluation](docs/EVALUATION.m
 - memory use, pin, forget, restore, and correction rules;
 - tests for the core behavior.
 
-## What is not claimed yet
+## 🚧 What is not claimed yet
 
 - a production database adapter;
 - a published npm package;
@@ -226,7 +226,7 @@ Different model and judge experiments are kept in [Evaluation](docs/EVALUATION.m
 - proof that 12 turns is better than every other block size;
 - a full LoCoMo result under one frozen end-to-end setup.
 
-## Repository layout
+## 📁 Repository layout
 
 ```text
 src/
@@ -241,6 +241,6 @@ docs/             deeper architecture and evaluation details
 benchmarks/       machine-readable development-run summaries
 ```
 
-## License
+## 📄 License
 
 StrataGate is available under the [MIT License](LICENSE).
