@@ -8,6 +8,8 @@
 
 面向长期 AI Agent 的分层记忆与证据检索系统。
 
+[![CI](https://github.com/diqierjia/StrataGate-AgentMemory/actions/workflows/ci.yml/badge.svg)](https://github.com/diqierjia/StrataGate-AgentMemory/actions/workflows/ci.yml)
+
 [English](README.md) · [架构说明](docs/ARCHITECTURE.md) · [完整评测](docs/EVALUATION.md)
 
 **LoCoMo `conv-26`：StrataGate 10 次独立评审平均准确率为 80.46%，Mem0 base 为 63.22%（+17.24 个百分点）**
@@ -22,7 +24,7 @@
 
 只保留摘要，容易丢失日期、限定条件和原话；只做相似度检索，可能找到相关内容，却不是问题真正询问的事件；把每次搜索命中都当作有效记忆，还会形成自我强化的检索反馈。
 
-StrataGate 将长期记忆拆成四个相互独立的环节：
+StrataGate 围绕四个核心问题设计长期记忆：
 
 | 常见问题 | StrataGate 的处理方式 |
 | --- | --- |
@@ -62,23 +64,9 @@ StrataGate 的目标不是让 Agent 每次检索更多，而是让它知道：**
 
 ## 工作流程
 
-对话先进入未封存的原始消息区。达到块边界后，同一段历史会被保存为 L0–L5 六种视图，并从中抽取带来源和时间信息的事件卡。
+![StrataGate 工作流程：分层记忆、事件卡与证据门](docs/assets/stratagate-how-it-works.zh-CN.png)
 
-问题到来后，系统先检索事件，再通过证据门判断当前材料是否足够。证据不足时，不会直接回答，而是展开事件、切换查询方式或回查原始消息。只有证据充分后，系统才进入回答，并记录本次答案真正采用了哪些记忆。
-
-```text
-对话
-  ↓
-分层记忆块（L0–L5）
-  ↓
-带来源和时间的事件卡
-  ↓
-问题到来
-  ↓
-检索 → 证据判断
-          ├─ sufficient → 回答 → 记录实际采用
-          └─ partial / wrong → 换策略、展开事件或回查原文
-```
+对话被封存为不同详细程度的分层记忆，并从中抽取带来源和时间的事件卡。问题到来后，系统先检索并判断证据是否充分；不足时继续展开事件或回查原始消息，证据充分后才回答。
 
 ## 核心设计
 
@@ -260,7 +248,7 @@ verdict = sufficient
 
 R1–R8 的完整实验过程、模型与 Judge 变化、逐题迁移和协议边界见 [`docs/EVALUATION.md`](docs/EVALUATION.md)。
 
-## 当前还没有解决的问题
+## 当前局限与下一步
 
 当前版本仍有 31 道多数票错误题。按最终可观察到的失败阶段划分：
 

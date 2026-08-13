@@ -8,6 +8,8 @@
 
 A layered memory and evidence retrieval system for long-running AI agents.
 
+[![CI](https://github.com/diqierjia/StrataGate-AgentMemory/actions/workflows/ci.yml/badge.svg)](https://github.com/diqierjia/StrataGate-AgentMemory/actions/workflows/ci.yml)
+
 [中文说明](README.zh-CN.md) · [Architecture](docs/ARCHITECTURE.md) · [Full evaluation](docs/EVALUATION.md)
 
 **LoCoMo `conv-26`: StrataGate averaged 80.46% accuracy across 10 independent Judge runs, versus 63.22% for Mem0 base (+17.24 percentage points)**
@@ -22,7 +24,7 @@ A long-running agent needs more than a way to “store more.” When it answers,
 
 Keeping only summaries can lose dates, qualifications, and original wording. Similarity search can return related material that belongs to a different event. Treating every search hit as useful memory can also create a self-reinforcing retrieval loop.
 
-StrataGate separates long-term memory into four independent concerns:
+StrataGate designs long-term memory around four core problems:
 
 | Common problem | How StrataGate handles it |
 | --- | --- |
@@ -62,23 +64,9 @@ This is a single-conversation comparison on `conv-26`, not a full LoCoMo score. 
 
 ## Workflow
 
-Conversation messages first enter an unsealed raw-message area. Once a block boundary is reached, the same history is stored as six L0–L5 views, and event cards with source and temporal information are extracted from it.
+![StrataGate workflow: layered memory, event cards, and the evidence gate](docs/assets/stratagate-how-it-works.en.png)
 
-When a question arrives, the system searches events and then asks the evidence gate whether the current material is sufficient. If it is not, the system does not answer immediately: it expands an event, changes query strategy, or returns to the original messages. Only after the evidence is sufficient does the system answer and record which memories the answer actually used.
-
-```text
-Conversation
-  ↓
-Layered memory blocks (L0–L5)
-  ↓
-Event cards with source and time
-  ↓
-Question arrives
-  ↓
-Retrieve → assess evidence
-             ├─ sufficient → answer → record actual use
-             └─ partial / wrong → change strategy, expand an event, or inspect the source
-```
+Conversations are sealed into layered memories at different levels of detail, and event cards with provenance and time are extracted from them. When a question arrives, the system retrieves evidence and assesses whether it is sufficient. If not, it continues by expanding events or returning to the original messages; it answers only after the evidence is sufficient.
 
 ## Core design
 
@@ -260,7 +248,7 @@ However, the two end-to-end runs also differed in soft filters, Chinese-English 
 
 For the complete R1–R8 experiment history, model and Judge changes, per-question transitions, and protocol boundaries, see [`docs/EVALUATION.md`](docs/EVALUATION.md).
 
-## What remains unsolved
+## Current limitations and next steps
 
 The current version still has 31 majority-wrong questions. Grouped by the final observable failure stage:
 
