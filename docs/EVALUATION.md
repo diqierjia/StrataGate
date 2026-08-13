@@ -1,121 +1,146 @@
 # Evaluation record and reporting rules
 
-This document separates completed development experiments from benchmark claims. Every public score should state the dataset scope, question categories, extraction model, answer model, judge model, prompt, repetitions, and whether the memory state was created inside the same run.
+This document separates completed development experiments from benchmark claims. Every public score should state the dataset scope, question categories, extraction model, answer model, Judge model, prompt, repetitions, and whether the memory state was created inside the same run.
 
-## Completed `conv-26` directional pairing
+## Final round-eight `conv-26` result
 
-The latest completed comparison covers one LoCoMo conversation, `conv-26`: 419 messages, 35 sessions, and 152 category 1-4 questions. Both arms answered the same questions in the same order and used `gpt-5.6-sol` with the same Judge prompt and ten independent Judge decisions per question.
+The latest completed run covers one LoCoMo conversation, `conv-26`: 419 messages, 35 sessions, and 152 category 1–4 questions. StrataGate completed all 152 answers and all 1,520 Judge decisions with no unrecovered question failure.
 
 > [!IMPORTANT]
-> This is a single-conversation directional comparison, not a full LoCoMo score or a cross-project leaderboard. The two arms did not use the same memory-construction pipeline or answer context, so the result does not isolate memory architecture as a single causal variable.
+> This is a single-conversation directional comparison, not a full LoCoMo score or a cross-project leaderboard. StrataGate and Mem0 used the same questions, answer model, Judge, prompt, parser, and repetitions, but different memory-construction, retrieval, embedding, and answer-context pipelines. The comparison does not isolate memory architecture as one causal variable.
 
 ### Overall result
 
-| Metric | StrataGate round seven | Mem0 base | StrataGate - Mem0 |
+| Metric | StrataGate final R8 | Mem0 base | StrataGate - Mem0 |
 | --- | ---: | ---: | ---: |
-| Ten-Judge mean accuracy | **71.9737%** | 63.2237% | **+8.7500 pp** |
-| Majority-correct questions | **111 / 152** | 96 / 152 | **+15** |
-| Majority accuracy | **73.03%** | 63.1579% | **+9.87 pp** |
+| Ten-Judge mean accuracy | **80.4606%** | 63.2237% | **+17.2369 pp** |
+| Standard deviation across Judge runs | 0.5138 pp | 0.9045 pp | -0.3907 pp |
+| Judge-run range | 79.6053%–81.5789% | 61.8421%–65.1316% | — |
+| Majority-correct questions | **121 / 152** | 96 / 152 | **+25** |
+| Majority accuracy | **79.61%** | 63.1579% | **+16.45 pp** |
 
-Mem0's ten independent Judge runs ranged from 61.8421% to 65.1316%, with a standard deviation of 0.9045 percentage points.
+The ± values describe repeated Judge variation on one fixed answer set. They are not confidence intervals across LoCoMo conversations.
 
 ### Mean accuracy by category
 
-| Category | Questions | StrataGate round seven | Mem0 base | StrataGate - Mem0 |
+| Category | Questions | StrataGate final R8 | Mem0 base | StrataGate - Mem0 |
 | --- | ---: | ---: | ---: | ---: |
-| Multi-hop | 32 | **63.4375%** | 61.5625% | +1.8750 pp |
-| Temporal | 37 | **61.3514%** | 34.5946% | **+26.7568 pp** |
-| Open-domain | 13 | 83.8462% | **84.6154%** | -0.7692 pp |
-| Single-hop | 70 | **79.2857%** | 75.1429% | +4.1428 pp |
+| Multi-hop | 32 | **66.5625%** | 61.5625% | +5.0000 pp |
+| Temporal | 37 | **74.8649%** | 34.5946% | **+40.2703 pp** |
+| Open-domain | 13 | 83.0769% | **84.6154%** | -1.5385 pp |
+| Single-hop | 70 | **89.2857%** | 75.1429% | **+14.1428 pp** |
 
-The largest observed gap is in the temporal category. That observation is consistent with StrataGate's explicit event-time fields and raw-message fallback, but this comparison alone is not an ablation and does not prove that either mechanism caused the full difference.
+The largest observed difference is temporal. Mem0's local base run often anchored relative dates from the 2023 conversation to the 2026 experiment date. StrataGate retained source timestamps and could fall back to the original messages. This mechanism is consistent with the gap, but the paired result is not an ablation and does not prove that timestamps or raw fallback caused the full difference.
 
 ### Paired majority outcomes
 
 | Outcome | Questions |
 | --- | ---: |
-| Both correct | 76 |
-| StrataGate correct, Mem0 wrong | 35 |
-| StrataGate wrong, Mem0 correct | 20 |
-| Both wrong | 21 |
+| Both correct | 80 |
+| StrataGate correct, Mem0 wrong | 41 |
+| StrataGate wrong, Mem0 correct | 16 |
+| Both wrong | 15 |
 
 ### Protocol matrix
 
-| Field | StrataGate round seven | Mem0 base |
+| Field | StrataGate final R8 | Mem0 base |
 | --- | --- | --- |
-| Dataset scope | `conv-26`, categories 1-4, 152 questions | Same IDs, order, text, gold answers, and categories |
-| Memory construction | Reused an existing state extracted with `gpt-4o-mini` | Fresh build with `gpt-5.6-sol` |
-| Retrieval and assessment | StrataGate tools and five-field evidence gate with `gpt-5.6-sol` | Two speaker searches, top-30 each; no graph |
-| Answer model | `gpt-5.6-sol`, `reasoning_effort=low` | `gpt-5.6-sol`, `reasoning_effort=low` |
-| Judge | `gpt-5.6-sol`, ten repeats | Same model, prompt, parser, and repeats |
+| Dataset scope | `conv-26`, categories 1–4, 152 questions | Same IDs, order, text, gold answers, and categories |
+| Memory construction | Fresh build from 419 timestamped messages with `gpt-5.6-sol`; 17 blocks, 97 events, 4 elements | Fresh build with `gpt-5.6-sol`; 173 final memories |
+| Retrieval and assessment | BM25/RRF event and fact-level element tools, raw-message fallback, four-round budget, five-field evidence gate | Two speaker searches, top-30 each; no graph |
+| Answer model | `gpt-5.6-sol`, `reasoning_effort=low` | Same |
+| Judge | `gpt-5.6-sol`, ten repeats, concurrency 1 | Same model, prompt, parser, and repeats |
 | Judge prompt SHA-256 | `44fb3d8f7a1f37b2430772cf90518a32172e4056b7a0dec085402763fd179b9f` | Same |
 | Answer context and prompt | StrataGate-specific | Mem0-specific |
-| Embedding | Architecture-specific retrieval; no shared embedding protocol | `text-embedding-3-small`, 1536 dimensions |
+| Embedding | No vector retrieval in the evaluated event/element search | `text-embedding-3-small`, 1536 dimensions |
 
-Mem0 used the local base SDK version 0.1.97 pinned to commit `2b58775c17eb1c1b7532242b7154af6744102280`, with Graph, Cloud, and Platform v3 disabled. It processed 419 source messages through two speaker views, completed all 428 write units, and produced 173 final memories.
+Mem0 used the local base SDK version 0.1.97 pinned to commit `2b58775c17eb1c1b7532242b7154af6744102280`, with Graph, Cloud, and Platform v3 disabled. It processed 419 source messages through two speaker views and completed all 428 write units.
 
-Both runs completed 152 / 152 questions and 1,520 / 1,520 Judge decisions. The Mem0 run retained 187 historical failed-attempt traces, but all were recovered and the unrecovered failure count is zero. Those bodyless failed attempts have no returned model value; they are not successful responses from a different model. The standalone structural protocol audit reports `passed=true`, while the generated summary keeps `passed=false` because its stricter request audit counts those historical `response.model=None` attempts. Completion and clean-transport acceptance are therefore reported separately.
+The StrataGate run recorded 2,065 successful model responses and 14 bodyless socket failures during extraction. All 14 failures were recovered from checkpoints, no completed question was replayed, and every successful response reported `gpt-5.6-sol`. The Mem0 run retained 187 historical failed-attempt traces, all recovered; its generated summary reports `passed=false` because it treats those bodyless attempts as missing `response.model`, even though successful responses returned the expected model. Completion and clean-transport acceptance are reported separately.
 
-The public, machine-readable aggregate is [`benchmarks/locomo-conv26-sol-mem0-paired.json`](../benchmarks/locomo-conv26-sol-mem0-paired.json). Raw requests and per-question traces are not copied into this public repository.
+The public aggregates are:
+
+- [`benchmarks/locomo-conv26-r8-final.json`](../benchmarks/locomo-conv26-r8-final.json) for final R8, its prior-round comparisons, and remaining-error stages;
+- [`benchmarks/locomo-conv26-sol-mem0-paired.json`](../benchmarks/locomo-conv26-sol-mem0-paired.json) for the earlier round-seven/Mem0 pairing retained as historical evidence;
+- [`benchmarks/locomo-conv26-development.json`](../benchmarks/locomo-conv26-development.json) for R1–R5.
+
+Raw requests and per-question traces are not copied into this public repository.
 
 | Source artifact | SHA-256 |
 | --- | --- |
-| StrataGate round-seven `summary.json` | `fe6ae48ca3d1c8fcc8bf65f11058e2253f64927db9b5b69af5fd1d8b91dcaa8e` |
+| Final R8 `summary.json` | `3e29d985fcdd88a385c106838c3046808c476affb63679c2e02601b5a2006656` |
+| Final R8 `checkpoint.json` | `82a2f5be362369c72aff39c7d6eaf9b5b6904ccba15a186aef1e7ff770ff79db` |
+| Final R8 `source-snapshot.patch` | `5eed8bd5fd7b316ad2aaf4b142992bac31c427ea81cbb1f7ab1e81449e08e581` |
 | Mem0 `summary.json` | `88f39b729546c6f343e51a11ad8f80bc1eea06ba831f33008fad779b04962927` |
 | Mem0 `paired-comparison.json` | `27b604692364f24600d9513d8d2b91da9b52245a4574f581afb0afc6f00ee7fc` |
 | Mem0 `protocol-audit.json` | `c1e39714eb08a775f9cbe12d0a43de6d825c142991840eab329398d1b9d744eb` |
 
 ## Development sequence
 
-The first five completed runs used one LoCoMo conversation, `conv-26`:
+All recorded rounds used the same `conv-26` development slice, but the model and scoring protocols changed. R1–R5 used `gpt-4o-mini` extraction with a GPT-4o answerer/Judge setup. R7 and R8 used ten `gpt-5.6-sol` Judge decisions per question. R6 stopped at a 123-question snapshot and has no final score.
 
-- 419 messages;
-- 35 sessions;
-- 152 category 1-4 questions;
-- `gpt-4o-mini` extraction;
-- `gpt-4o` answerer and judge.
+| Run | Main intervention | Reported result | Protocol note |
+| --- | --- | ---: | --- |
+| R1 | Initial layered blocks and event cards | 67 / 152 (44.08%) | Temporal accuracy 18.92% |
+| R2 | Multiple event cards per block and explicit occurrence time | 77 / 152 (50.66%) | Temporal accuracy rose to 45.95% |
+| R3 | Extraction, read tools, and per-batch assessment changed together | 116 / 152 (76.32%) | One adoption-rule violation; strict result 115 / 152 (75.66%) |
+| R4 | Bounded five-field assessment context | 118 / 152 (77.63%) | Zero recorded adoption violations and about 10.35% fewer QA tokens than R3 |
+| R5 | Larger structured retrieval scratchpad | 97 / 152 (63.82%) | Reproducible regression led to restoring the smaller gate |
+| R6 | Mini-model sensitivity run | incomplete | 123-question snapshot only; no final score |
+| R7 | Sol retrieval, assessment, answer, and Judge | 71.9737% mean; 111 / 152 majority | Reused a state extracted with `gpt-4o-mini`; not end-to-end Sol |
+| R8 initial | Fresh end-to-end Sol extraction and hybrid event/element retrieval | 70.3289% mean; 107 / 152 majority | Repeated card searches frequently exhausted the budget |
+| **R8 final** | Fresh end-to-end Sol state with raw fallback and retrieval fixes | **80.4606% mean; 121 / 152 majority** | Best completed result on this slice |
 
-The fixed slice made regressions cheap to inspect, but it is not a full LoCoMo evaluation.
+The sequence supports several engineering conclusions, not a single cumulative causal curve:
 
-| Run | Main intervention | Correct | Accuracy | Protocol note |
-| --- | --- | ---: | ---: | --- |
-| 1 | Initial block/event architecture | 67 / 152 | 44.08% | Temporal questions were especially weak |
-| 2 | Multiple event cards per block and explicit event occurrence time | 77 / 152 | 50.66% | Temporal-category accuracy rose from 18.92% to 45.95% |
-| 3 | Extraction, read tools, and per-batch assessment changed together | 116 / 152 | 76.32% | One adoption-rule violation; strict score 115 / 152 (75.66%) |
-| 4 | Bounded assessment context and fixed budget-end adoption | 118 / 152 | 77.63% | Zero recorded adoption violations; about 10.35% fewer QA tokens than run 3 |
-| 5 | Larger structured retrieval scratchpad | 97 / 152 | 63.82% | Regression led to restoring run 4's five-field contract |
+1. Explicit occurrence time improved temporal questions on the fixed early-round protocol.
+2. A small, enforceable evidence gate performed better than a larger structured scratchpad.
+3. Model and Judge changes materially affect scores; at least one fixed answer moved from 10 / 10 correct under the mini Judge to 0 / 10 under the Sol Judge.
+4. Retrieval strategy matters more than raw search count. Repeating the same card search can be worse than changing channel and checking the original source.
+5. Element-card value remains unresolved. Final R8 used `search_elements` on only four questions; all four were correct, but this usage-conditioned subset is too small and selected to support a causal claim.
 
-These runs show an engineering process. They do not isolate every causal variable. In particular, run 3 changed several components at once, so its gain cannot be attributed to a single tool or prompt.
+## Initial R8 versus final R8
 
-## Protocol controls and sensitivity checks
+| Metric | Initial R8 | Final R8 | Change |
+| --- | ---: | ---: | ---: |
+| Ten-Judge mean | 70.3289% | **80.4606%** | **+10.1317 pp** |
+| Majority correct | 107 / 152 | **121 / 152** | **+14** |
+| Retrieval rounds | 215 | **146** | -69 (-32.1%) |
+| Assessment calls | 237 | **146** | -91 (-38.4%) |
+| Total tokens | 6,692,417 | **4,088,324** | -2,604,093 (-38.9%) |
+| Official-equivalent cost | $33.907499 | **$21.406145** | -$12.501354 (-36.9%) |
 
-Later runs answered different questions about the evaluation protocol and are not added to the development curve.
+Question-level majority transitions were: 95 both correct, 26 final-R8-only correct, 12 initial-R8-only correct, and 19 both wrong.
 
-### Frozen mini-model protocol
+The initial run had 19 questions with at least three `search_events` calls; only 2 were majority-correct. Final R8 answered 15 of those same questions correctly, with 12 using raw-message fallback. A representative temporal question asked when Caroline gave a school speech: the initial run repeatedly searched event cards and abstained, while final R8 fell back to the source message dated 2023-06-09, resolved “last week,” and received 10 / 10 correct Judge votes.
 
-A completed 152-question run fixed extraction, answering, judging, prompt, temperature, category scope, and ten independent judge decisions per question to the chosen mini-model protocol.
+This is strong diagnostic evidence that the old repeated-search path was defective. It is not a clean ablation: retrieval policy, filters, element result shape, and freshly extracted memory contents all changed.
 
-- 152 / 152 questions completed;
-- ten judge decisions per question;
-- mean score: 48.9474%;
-- majority score: 74 / 152 (48.68%).
+## Remaining-error analysis
 
-This result is useful for protocol comparability. It must not be plotted as a direct regression from run 4 because the answerer and judge changed.
+Final R8 has 31 majority-wrong questions. Their observable failure stage is:
 
-### Sol retrieval/answer/judge sensitivity run
+| Failure stage | Questions | Multi-hop | Temporal | Open-domain | Single-hop |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Direct answer without retrieval | 15 | 5 | 3 | 2 | 5 |
+| Retrieval marked `sufficient`, final answer wrong | 14 | 6 | 6 | 0 | 2 |
+| Retrieval remained `partial` at the limit | 2 | 0 | 1 | 0 | 1 |
+| **Total** | **31** | **11** | **10** | **2** | **8** |
 
-Another completed run used `gpt-5.6-sol` for retrieval, assessment, answering, and judging:
+The two largest problems are therefore not a lack of retrieval rounds:
 
-- 152 / 152 questions completed;
-- 1,520 judge decisions;
-- mean score: 71.9737%;
-- majority score: 111 / 152 (73.03%).
+- **Direct-answer risk:** 15 wrong answers bypassed retrieval entirely. These include missed list facts, wrong event details, and unanchored relative dates.
+- **False sufficiency:** 14 answers passed the evidence gate but were still wrong. The selected material was often related but belonged to an adjacent event, or it supported only part of a requested list.
 
-This run reused a previously extracted memory state. It was not an end-to-end Sol extraction result. Retrieval, assessment, answering, and judging changed together, so the score is directional and not evidence that any one memory component caused the difference.
+Recurring patterns include:
 
-### Judge sensitivity
+- choosing the wrong research topic or the wrong pottery event;
+- resolving a relative date against the wrong message or returning “next month” without an absolute anchor;
+- omitting one item from books, instruments, purchases, or attended events;
+- using a generally plausible reason instead of the event-specific reason requested;
+- open-domain Judge disagreements where the memory evidence supports more than one cautious inference.
 
-At least one fixed answer received opposite judgments under two judge models: 10 / 10 correct with the mini judge and 0 / 10 with the Sol judge. This is why StrataGate does not treat judge changes as memory-quality changes.
+The next diagnostic should inject the gold-evidence raw block while keeping the answer and Judge protocol fixed. That oracle split will distinguish retrieval/selection failure from answer reasoning and temporal-calculation failure. Before increasing the retrieval budget, the implementation should also gate direct temporal/multi-hop answers, tighten `sufficient` against adjacent events, and add completeness checks for list questions.
 
 ## Reporting checklist
 
@@ -126,7 +151,7 @@ Before treating two scores as comparable, freeze and report:
 - extraction code and model;
 - retrieval code, tools, budgets, and prompts;
 - answer model, temperature, and reasoning configuration;
-- judge prompt, model, temperature, and repetitions;
+- Judge prompt, model, temperature, parser, and repetitions;
 - provider and returned-model audit;
 - memory-state provenance;
 - retries, missing responses, and checkpoint completion;
@@ -136,19 +161,19 @@ Before treating two scores as comparable, freeze and report:
 
 The current evidence supports these narrow claims:
 
-- on this single conversation and these tested configurations, StrataGate round seven scored 111 / 152 by majority vote and Mem0 base scored 96 / 152;
-- the largest observed paired category gap was temporal, while Mem0 was slightly higher on open-domain questions;
-- separating event occurrence time from mention time improved temporal questions on the fixed development conversation;
-- evidence checking after retrieval batches was part of the best-performing development configuration;
-- the larger retrieval scratchpad caused a reproducible regression on the same slice;
-- judge choice can materially change the score of identical answers;
+- on `conv-26` and the tested configurations, final R8 scored 121 / 152 by majority vote and Mem0 base scored 96 / 152;
+- the largest observed paired category difference was temporal, while Mem0 remained slightly higher on open-domain questions;
+- the final R8 retrieval policy avoided a measured repeated-event-search failure mode while using fewer rounds, tokens, and cost;
+- explicit occurrence time, an enforceable evidence gate, and raw-source access are useful components on this development slice;
+- remaining errors are split mainly between direct answers that skipped retrieval and retrieved evidence incorrectly marked sufficient;
 - completed per-question checkpoints and request traces are necessary to distinguish model behavior from transport failure.
 
 It does not yet support these broader claims:
 
 - state of the art on LoCoMo;
 - generalization across the full LoCoMo dataset;
-- superiority to another open-source memory system under a shared end-to-end protocol;
-- a single-component causal explanation for the run 3 or Sol gains.
+- architectural superiority under a shared end-to-end retrieval and context protocol;
+- a single-component causal explanation for the final R8 gain;
+- a causal benefit from element cards without disabled/forced/fixed-state ablations.
 
-The next credible milestone is a full-dataset, end-to-end run with one frozen protocol, a freshly built StrataGate memory state, and a baseline created under the same extraction, answer, and Judge configuration.
+The next credible milestone is a fixed-state component ablation, followed by the same frozen end-to-end protocol across more conversations and then the full dataset.

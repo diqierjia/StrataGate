@@ -1,0 +1,146 @@
+{
+  "benchmark": "LoCoMo",
+  "scope": {
+    "conversation": "conv-26",
+    "messages": 419,
+    "sessions": 35,
+    "categories": [1, 2, 3, 4],
+    "questions": 152,
+    "warning": "Single-conversation directional comparison. Not a full LoCoMo score or a cross-project leaderboard."
+  },
+  "final_round_eight": {
+    "run_id": "locomo-conv0-r8-redo-retrieval-fix-20260813-conv0",
+    "protocol": "fresh end-to-end gpt-5.6-sol extraction, retrieval, assessment, answer, and Judge",
+    "models": {
+      "extraction": "gpt-5.6-sol",
+      "answer": "gpt-5.6-sol",
+      "judge": "gpt-5.6-sol"
+    },
+    "reasoning_effort": "low",
+    "completed_questions": 152,
+    "judge_decisions": 1520,
+    "judge_prompt_sha256": "44fb3d8f7a1f37b2430772cf90518a32172e4056b7a0dec085402763fd179b9f",
+    "mean_accuracy_percent": 80.4606,
+    "standard_deviation_percent": 0.5138,
+    "range_percent": [79.6053, 81.5789],
+    "majority_correct": 121,
+    "majority_accuracy_percent": 79.61,
+    "by_category_mean_accuracy_percent": {
+      "multi-hop": 66.5625,
+      "temporal": 74.8649,
+      "open-domain": 83.0769,
+      "single-hop": 89.2857
+    },
+    "memory_state": {
+      "blocks": 17,
+      "events": 97,
+      "elements": 4
+    },
+    "retrieval": {
+      "rounds": 146,
+      "average_rounds_per_question": 0.9605,
+      "assessment_calls": 146,
+      "final_assessment_counts": {
+        "sufficient": 70,
+        "partial": 5,
+        "wrong": 2,
+        "direct": 75
+      }
+    },
+    "request_accounting": {
+      "successful_model_responses": 2065,
+      "bodyless_failed_attempts": 14,
+      "unrecovered_failed_calls": 0,
+      "total_tokens": 4088324,
+      "official_equivalent_cost_usd": 21.406145
+    }
+  },
+  "mem0_base": {
+    "run_id": "locomo-conv0-mem0-base-gpt56sol-20260809",
+    "implementation": "local Mem0 base SDK 0.1.97 at 2b58775c17eb1c1b7532242b7154af6744102280",
+    "completed_questions": 152,
+    "judge_decisions": 1520,
+    "mean_accuracy_percent": 63.2237,
+    "standard_deviation_percent": 0.9045,
+    "range_percent": [61.8421, 65.1316],
+    "majority_correct": 96,
+    "majority_accuracy_percent": 63.1579,
+    "by_category_mean_accuracy_percent": {
+      "multi-hop": 61.5625,
+      "temporal": 34.5946,
+      "open-domain": 84.6154,
+      "single-hop": 75.1429
+    },
+    "total_tokens": 3009448,
+    "official_equivalent_cost_usd": 20.89670904
+  },
+  "difference_final_r8_minus_mem0": {
+    "mean_accuracy_percentage_points": 17.2369,
+    "majority_correct_questions": 25,
+    "majority_accuracy_percentage_points": 16.4474,
+    "by_category_percentage_points": {
+      "multi-hop": 5.0,
+      "temporal": 40.2703,
+      "open-domain": -1.5385,
+      "single-hop": 14.1428
+    }
+  },
+  "paired_majority_outcomes_vs_mem0": {
+    "both_correct": 80,
+    "stratagate_correct_mem0_wrong": 41,
+    "stratagate_wrong_mem0_correct": 16,
+    "both_wrong": 15
+  },
+  "initial_round_eight": {
+    "run_id": "locomo-conv0-r8-e2e-sol-elements-hybrid-20260812-conv0",
+    "mean_accuracy_percent": 70.3289,
+    "majority_correct": 107,
+    "majority_accuracy_percent": 70.39,
+    "retrieval_rounds": 215,
+    "assessment_calls": 237,
+    "total_tokens": 6692417,
+    "official_equivalent_cost_usd": 33.907499
+  },
+  "difference_final_minus_initial_r8": {
+    "mean_accuracy_percentage_points": 10.1317,
+    "majority_correct_questions": 14,
+    "retrieval_rounds": -69,
+    "assessment_calls": -91,
+    "total_tokens": -2604093,
+    "official_equivalent_cost_usd": -12.501354,
+    "paired_majority_outcomes": {
+      "both_correct": 95,
+      "final_only_correct": 26,
+      "initial_only_correct": 12,
+      "both_wrong": 19
+    }
+  },
+  "remaining_majority_errors": {
+    "total": 31,
+    "by_category": {
+      "multi-hop": 11,
+      "temporal": 10,
+      "open-domain": 2,
+      "single-hop": 8
+    },
+    "by_observed_failure_stage": {
+      "direct_answer_without_retrieval": 15,
+      "retrieval_marked_sufficient_but_answer_wrong": 14,
+      "partial_evidence_at_budget_limit": 2
+    }
+  },
+  "non_shared_protocol_fields_vs_mem0": [
+    "memory construction and extraction implementation",
+    "retrieval implementation",
+    "answer context and answer prompt",
+    "embedding stack"
+  ],
+  "source_artifact_sha256": {
+    "final_r8_summary_json": "3e29d985fcdd88a385c106838c3046808c476affb63679c2e02601b5a2006656",
+    "final_r8_checkpoint_json": "82a2f5be362369c72aff39c7d6eaf9b5b6904ccba15a186aef1e7ff770ff79db",
+    "final_r8_source_snapshot_patch": "5eed8bd5fd7b316ad2aaf4b142992bac31c427ea81cbb1f7ab1e81449e08e581",
+    "mem0_summary_json": "88f39b729546c6f343e51a11ad8f80bc1eea06ba831f33008fad779b04962927",
+    "mem0_paired_comparison_json": "27b604692364f24600d9513d8d2b91da9b52245a4574f581afb0afc6f00ee7fc",
+    "mem0_protocol_audit_json": "c1e39714eb08a775f9cbe12d0a43de6d825c142991840eab329398d1b9d744eb"
+  }
+}
