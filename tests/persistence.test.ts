@@ -52,17 +52,17 @@ const extractor: EventExtractor = async ({ target }) => ({
 });
 
 describe('SQLite persistence', () => {
-  it('creates schema version one and rejects a newer database schema', async () => {
+  it('creates schema version two and rejects a newer database schema', async () => {
     const initializedFilename = await databasePath();
     const initialized = new SqliteStorage({ filename: initializedFilename });
     await initialized.close();
     const initializedDatabase = new Database(initializedFilename, { readonly: true });
-    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(1);
+    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(2);
     initializedDatabase.close();
 
     const newerFilename = await databasePath();
     const newerDatabase = new Database(newerFilename);
-    newerDatabase.pragma('user_version = 2');
+    newerDatabase.pragma('user_version = 3');
     newerDatabase.close();
     expect(() => new SqliteStorage({ filename: newerFilename })).toThrow('newer than supported');
   });
@@ -228,7 +228,7 @@ describe('SQLite persistence', () => {
       await restored.recordMemoryUse([restoredEvent.id], { receiptId: 'answer:42' });
       expect(restoredEvent.weight.mentionCount).toBe(2);
       await expect(restored.recordMemoryUse([], { receiptId: 'answer:42' }))
-        .rejects.toThrow('different event IDs');
+        .rejects.toThrow('different memory IDs');
     }
     await restored.close();
   });
@@ -256,5 +256,95 @@ describe('SQLite persistence', () => {
     expect(stale.listOpenTail()).toHaveLength(0);
     await first.close();
     await stale.close();
+  });
+
+  it('migrates a schema-v1 database in place without losing its namespace', async () => {
+    const filename = await databasePath();
+    const legacy = new Database(filename);
+    legacy.exec(`
+      CREATE TABLE memory_spaces (
+        namespace TEXT PRIMARY KEY,
+        schema_version INTEGER NOT NULL,
+        revision INTEGER NOT NULL,
+        current_turn INTEGER NOT NULL,
+        block_turn_size INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE usage_receipts (
+        namespace TEXT NOT NULL,
+        receipt_id TEXT NOT NULL,
+        event_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (namespace, receipt_id),
+        FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
+      ) STRICT;
+      INSERT INTO memory_spaces VALUES ('legacy:user', 1, 7, 0, 12, '2026-01-01', '2026-01-01');
+      PRAGMA user_version = 1;
+    `);
+    legacy.close();
+
+    const storage = new SqliteStorage({ filename });
+    const loaded = await storage.load('legacy:user');
+    expect(loaded?.revision).toBe(7);
+    expect(loaded?.snapshot).toMatchObject({ schemaVersion: 2, elements: [], elementProjectionJobs: [] });
+    await storage.close();
+
+    const migrated = new Database(filename, { readonly: true });
+    expect(migrated.pragma('user_version', { simple: true })).toBe(2);
+    expect((migrated.pragma('table_info(usage_receipts)') as Array<{ name: string }>)
+      .map(({ name }) => name)).toContain('element_ids_json');
+    expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'elements'")
+      .pluck().get()).toBe('elements');
+    migrated.close();
+  });
+
+  it('persists projected elements and idempotent element-use receipts across restarts', async () => {
+    const filename = await databasePath();
+    const storage = new SqliteStorage({ filename });
+    const elementIdFactory = (() => {
+      let value = 0;
+      return (prefix: 'elem' | 'fact' | 'proj') => `${prefix}_${++value}`;
+    })();
+    const first = await StrataGate.open({
+      storage,
+      namespace: 'project:elements',
+      blockTurnSize: 1,
+      summarizer,
+      extractor,
+      idFactory: ids(),
+      elementIdFactory,
+      elementProjector: async ({ events }) => ({
+        reason: 'project current state',
+        changes: [{
+          element: { name: 'StrataGate', type: 'project' },
+          operation: 'set_state',
+          key: 'storage',
+          mode: 'state',
+          value: 'SQLite',
+          sourceEventIds: [events[0]?.id ?? 'missing'],
+        }],
+      }),
+      now: fixedNow,
+    });
+    await first.appendTurn({ user: 'Use SQLite.', assistant: 'Recorded.' });
+    await first.appendTurn({ user: 'Continue.', assistant: 'Okay.' });
+    const element = first.listElements()[0];
+    expect(element?.currentState).toContain('SQLite');
+    if (!element) return;
+    await first.recordMemoryUse({ elementIds: [element.id] }, { receiptId: 'answer:element:1' });
+    await first.recordMemoryUse({ elementIds: [element.id] }, { receiptId: 'answer:element:1' });
+    expect(element.weight.mentionCount).toBe(2);
+    await first.close();
+
+    const restoredStorage = new SqliteStorage({ filename });
+    const restored = await StrataGate.open({ storage: restoredStorage, namespace: 'project:elements' });
+    expect(restored.listElements()[0]).toMatchObject({
+      name: 'StrataGate',
+      currentState: 'storage: SQLite',
+      weight: { mentionCount: 2 },
+    });
+    expect(restored.listElementProjectionJobs()[0]?.status).toBe('completed');
+    await restored.close();
   });
 });

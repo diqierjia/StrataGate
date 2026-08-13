@@ -1,9 +1,11 @@
-export const RETRIEVAL_CONTRACT_VERSION = 4;
+export const RETRIEVAL_CONTRACT_VERSION = 5;
 
 export const RETRIEVAL_STRATEGIES = [
   'answer',
   'search_events',
   'expand_event',
+  'search_elements',
+  'expand_element',
   'search_raw_memory',
   'expand_block',
 ] as const;

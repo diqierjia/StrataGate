@@ -5,11 +5,21 @@ import {
   getDecayedBlockLevel,
   normalizeBlockLevel,
 } from './blocks.js';
+import { applyElementChanges, elementViewAt } from './elements.js';
 import { normalizeRetrievalAssessment, type RetrievalAssessment, type RetrievalAssessmentInput } from './retrieval.js';
 import {
+  bm25Rank,
+  fuzzySearchMatch,
+  normalizeSearchText,
+  rrfRank,
+  searchTokens,
+  weightedSearchTokens,
+} from './search.js';
+import {
   STRATAGATE_STORAGE_SCHEMA_VERSION,
-  assertValidSnapshot,
   cloneSnapshot,
+  normalizeSnapshot,
+  type ElementProjectionJob,
   type ExtractionJob,
   type StorageAdapter,
   type StrataGateSnapshot,
@@ -19,6 +29,12 @@ import type {
   AppendTurnResult,
   BlockLevel,
   BlockSummarizer,
+  ElementCard,
+  ElementProjectionContext,
+  ElementProjectionResult,
+  ElementProjector,
+  ElementSearchOptions,
+  ElementSearchResult,
   EventCard,
   EventCardInput,
   EventExtractor,
@@ -35,8 +51,10 @@ export interface StrataGateOptions {
   blockTurnSize?: number;
   summarizer?: BlockSummarizer;
   extractor?: EventExtractor;
+  elementProjector?: ElementProjector;
   now?: () => Date;
   idFactory?: (prefix: 'msg' | 'blk' | 'evt') => string;
+  elementIdFactory?: (prefix: 'elem' | 'fact' | 'proj') => string;
 }
 
 export interface PersistentStrataGateOptions extends StrataGateOptions {
@@ -64,12 +82,22 @@ export interface RecordMemoryUseOptions {
   receiptId?: string;
 }
 
+export interface MemoryUseRefs {
+  eventIds?: readonly string[];
+  elementIds?: readonly string[];
+}
+
 export interface ResumePendingResult {
   sealedBlocks: MemoryBlock[];
   extractedEvents: EventCard[];
+  projectedElements: ElementCard[];
 }
 
 function defaultIdFactory(prefix: 'msg' | 'blk' | 'evt'): string {
+  return `${prefix}_${crypto.randomUUID()}`;
+}
+
+function defaultElementIdFactory(prefix: 'elem' | 'fact' | 'proj'): string {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
@@ -89,18 +117,6 @@ function defaultSummary(messages: readonly RawMessage[]): {
     l2Keypoints: natural.slice(0, 8).map((message) => message.content.replace(/\s+/g, ' ').trim().slice(0, 160)),
     shouldExtract: false,
   };
-}
-
-function normalizeText(value: string): string {
-  return value.toLocaleLowerCase().normalize('NFKC');
-}
-
-function queryTokens(value: string): string[] {
-  const normalized = normalizeText(value);
-  const words = normalized.match(/[\p{L}\p{N}_-]+/gu) ?? [];
-  const cjkRuns = normalized.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+/gu) ?? [];
-  const bigrams = cjkRuns.flatMap((run) => Array.from({ length: Math.max(0, run.length - 1) }, (_, index) => run.slice(index, index + 2)));
-  return [...new Set([...words, ...bigrams].filter((token) => token.length > 1))];
 }
 
 function renderBlock(block: MemoryBlock, level: BlockLevel): string {
@@ -125,12 +141,16 @@ export class StrataGate {
 
   private readonly summarizer: BlockSummarizer | undefined;
   private readonly extractor: EventExtractor | undefined;
+  private readonly elementProjector: ElementProjector | undefined;
   private readonly now: () => Date;
   private readonly idFactory: (prefix: 'msg' | 'blk' | 'evt') => string;
+  private readonly elementIdFactory: (prefix: 'elem' | 'fact' | 'proj') => string;
   private readonly openTail: RawMessage[] = [];
   private readonly blocks: MemoryBlock[] = [];
   private readonly events: EventCard[] = [];
+  private readonly elements: ElementCard[] = [];
   private readonly extractionJobs = new Map<string, ExtractionJob>();
+  private readonly elementProjectionJobs = new Map<string, ElementProjectionJob>();
   private readonly usageReceipts = new Map<string, UsageReceipt>();
   private currentTurn = 0;
   private storage: StorageAdapter | undefined;
@@ -142,32 +162,37 @@ export class StrataGate {
     this.blockTurnSize = Math.max(1, Math.floor(options.blockTurnSize ?? DEFAULT_BLOCK_TURN_SIZE));
     this.summarizer = options.summarizer;
     this.extractor = options.extractor;
+    this.elementProjector = options.elementProjector;
     this.now = options.now ?? (() => new Date());
     this.idFactory = options.idFactory ?? defaultIdFactory;
+    this.elementIdFactory = options.elementIdFactory ?? defaultElementIdFactory;
   }
 
   static async open(options: PersistentStrataGateOptions): Promise<StrataGate> {
     const namespace = options.namespace.trim();
     if (!namespace) throw new TypeError('Storage namespace must not be empty');
     const loaded = await options.storage.load(namespace);
+    const loadedSnapshot = loaded ? normalizeSnapshot(loaded.snapshot) : null;
     if (loaded && options.blockTurnSize !== undefined) {
       const requested = Math.max(1, Math.floor(options.blockTurnSize));
-      if (requested !== loaded.snapshot.blockTurnSize) {
-        throw new Error(`Stored blockTurnSize is ${loaded.snapshot.blockTurnSize}, but ${requested} was requested`);
+      if (requested !== loadedSnapshot?.blockTurnSize) {
+        throw new Error(`Stored blockTurnSize is ${loadedSnapshot?.blockTurnSize}, but ${requested} was requested`);
       }
     }
     const memoryOptions: StrataGateOptions = {};
-    if (loaded) memoryOptions.blockTurnSize = loaded.snapshot.blockTurnSize;
+    if (loadedSnapshot) memoryOptions.blockTurnSize = loadedSnapshot.blockTurnSize;
     else if (options.blockTurnSize !== undefined) memoryOptions.blockTurnSize = options.blockTurnSize;
     if (options.summarizer) memoryOptions.summarizer = options.summarizer;
     if (options.extractor) memoryOptions.extractor = options.extractor;
+    if (options.elementProjector) memoryOptions.elementProjector = options.elementProjector;
     if (options.now) memoryOptions.now = options.now;
     if (options.idFactory) memoryOptions.idFactory = options.idFactory;
+    if (options.elementIdFactory) memoryOptions.elementIdFactory = options.elementIdFactory;
     const memory = new StrataGate(memoryOptions);
     memory.storage = options.storage;
     memory.namespace = namespace;
-    if (loaded) {
-      memory.restoreSnapshot(loaded.snapshot);
+    if (loaded && loadedSnapshot) {
+      memory.restoreSnapshot(loadedSnapshot);
       memory.revision = loaded.revision;
       const interrupted = [...memory.extractionJobs.values()].filter((job) => job.status === 'running');
       if (interrupted.length > 0) {
@@ -178,6 +203,21 @@ export class StrataGate {
               ...job,
               status: 'failed',
               lastError: 'Extraction was interrupted before completion.',
+              updatedAt: now,
+            });
+          }
+        });
+      }
+      const interruptedProjections = [...memory.elementProjectionJobs.values()]
+        .filter((job) => job.status === 'running');
+      if (interruptedProjections.length > 0) {
+        await memory.commitMutation(() => {
+          const now = memory.now().toISOString();
+          for (const job of interruptedProjections) {
+            memory.elementProjectionJobs.set(job.id, {
+              ...job,
+              status: 'failed',
+              lastError: 'Element projection was interrupted before completion.',
               updatedAt: now,
             });
           }
@@ -205,12 +245,20 @@ export class StrataGate {
     return this.events;
   }
 
+  listElements(): readonly ElementCard[] {
+    return this.elements;
+  }
+
   listOpenTail(): readonly RawMessage[] {
     return this.openTail;
   }
 
   listExtractionJobs(): readonly ExtractionJob[] {
     return [...this.extractionJobs.values()];
+  }
+
+  listElementProjectionJobs(): readonly ElementProjectionJob[] {
+    return [...this.elementProjectionJobs.values()];
   }
 
   exportSnapshot(): StrataGateSnapshot {
@@ -221,7 +269,9 @@ export class StrataGate {
       openTail: this.openTail,
       blocks: this.blocks,
       events: this.events,
+      elements: this.elements,
       extractionJobs: [...this.extractionJobs.values()],
+      elementProjectionJobs: [...this.elementProjectionJobs.values()],
       usageReceipts: [...this.usageReceipts.values()],
     });
   }
@@ -248,70 +298,110 @@ export class StrataGate {
     });
 
     if (this.openTail.filter((message) => message.role === 'user').length < this.blockTurnSize) {
-      return { sealedBlock: null, extractedEvents: [] };
+      const projectedElements = await this.projectEligibleElements() ?? [];
+      return { sealedBlock: null, extractedEvents: [], projectedElements };
     }
 
     const sealedBlock = await this.sealOpenTail();
     const extractedEvents = await this.extractEligibleBlock() ?? [];
-    return { sealedBlock, extractedEvents };
+    const projectedElements = await this.projectEligibleElements() ?? [];
+    return { sealedBlock, extractedEvents, projectedElements };
   }
 
   async resumePendingWork(): Promise<ResumePendingResult> {
     const sealedBlocks: MemoryBlock[] = [];
     const extractedEvents: EventCard[] = [];
+    const projectedElements: ElementCard[] = [];
     while (this.openTail.filter((message) => message.role === 'user').length >= this.blockTurnSize) {
       sealedBlocks.push(await this.sealOpenTail());
       extractedEvents.push(...(await this.extractEligibleBlock() ?? []));
+      projectedElements.push(...(await this.projectEligibleElements() ?? []));
     }
     while (true) {
       const extracted = await this.extractEligibleBlock();
       if (extracted === null) break;
       extractedEvents.push(...extracted);
+      projectedElements.push(...(await this.projectEligibleElements() ?? []));
     }
-    return { sealedBlocks, extractedEvents };
+    while (true) {
+      const projected = await this.projectEligibleElements();
+      if (projected === null) break;
+      projectedElements.push(...projected);
+    }
+    return { sealedBlocks, extractedEvents, projectedElements };
   }
 
   async addEvent(input: EventCardInput): Promise<EventCard> {
-    return this.commitMutation(() => this.addEventInMemory(input));
+    return this.commitMutation(() => {
+      const event = this.addEventInMemory(input);
+      this.queueElementProjection([event.id]);
+      return event;
+    });
   }
 
   async searchEvents(query: string, options: SearchOptions = {}): Promise<EventSearchResult[]> {
-    const tokens = queryTokens(query);
-    const participants = (options.participants ?? []).map(normalizeText);
-    const eventType = options.eventType ? normalizeText(options.eventType) : null;
-    const ranked = this.events
-      .filter((event) => event.status === 'active' || event.status === 'superseded')
-      .filter((event) => participants.length === 0 || participants.every((person) =>
-        (event.temporal.participants ?? []).some((candidate) => normalizeText(candidate).includes(person))))
-      .filter((event) => !eventType || normalizeText(event.temporal.eventType ?? '').includes(eventType))
-      .map((event) => {
-        const temporal = event.temporal;
-        const searchable = normalizeText([
-          event.title,
-          event.summary,
-          event.narrative,
-          ...event.tags,
-          ...event.quotes,
-          ...(temporal.participants ?? []),
-          temporal.eventType ?? '',
-          temporal.happenedStart ?? '',
-          temporal.happenedEnd ?? '',
-          temporal.originalText ?? '',
-        ].join(' '));
-        const matched = tokens.filter((token) => searchable.includes(token)).length;
-        const lexical = tokens.length === 0 ? 0 : matched / tokens.length;
-        const timeBonus = options.temporalIntent && /(\d{4}|when|before|after|first|last|何时|什么时候|之前|之后|最早|最近)/iu.test(query)
-          && Boolean(temporal.happenedStart || temporal.happenedEnd) ? 0.2 : 0;
-        const statusPenalty = event.status === 'superseded' ? -0.25 : 0;
-        return { event, score: lexical * 2 + memoryWeightAt(event, this.currentTurn) + timeBonus + statusPenalty };
-      })
-      .filter(({ score }) => tokens.length === 0 || score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, Math.max(1, Math.min(20, options.limit ?? 6)));
-
-    if (options.temporalIntent) {
-      ranked.sort((a, b) => (a.event.temporal.happenedStart ?? '').localeCompare(b.event.temporal.happenedStart ?? ''));
+    const limit = Math.max(1, Math.min(20, options.limit ?? 6));
+    const participants = (options.participants ?? []).map(normalizeSearchText).filter(Boolean);
+    const eventType = normalizeSearchText(options.eventType ?? '');
+    const from = options.happenedFrom ? Date.parse(options.happenedFrom) : Number.NEGATIVE_INFINITY;
+    const to = options.happenedTo ? Date.parse(options.happenedTo) : Number.POSITIVE_INFINITY;
+    const hasTimeFilter = Boolean(options.happenedFrom || options.happenedTo);
+    const candidates = this.events.filter((event) => event.status === 'active' || event.status === 'superseded');
+    const participantMatches = candidates.filter((event) => participants.length > 0 && participants.every((person) =>
+      (event.temporal.participants ?? []).some((candidate) => fuzzySearchMatch(candidate, person))));
+    const typeMatches = eventType ? candidates.filter((event) =>
+      fuzzySearchMatch(event.temporal.eventType ?? '', eventType)
+      || fuzzySearchMatch(`${event.title} ${event.summary} ${event.tags.join(' ')}`, eventType)) : [];
+    const timeMatches = hasTimeFilter ? candidates.filter((event) => {
+      const start = Date.parse(event.temporal.happenedStart ?? event.temporal.happenedEnd ?? '');
+      const end = Date.parse(event.temporal.happenedEnd ?? event.temporal.happenedStart ?? '');
+      return Number.isFinite(start) && Number.isFinite(end) && start <= to && end >= from;
+    }) : [];
+    const bm25 = bm25Rank(candidates, query, (event) => weightedSearchTokens([
+      [event.title, 4],
+      [event.summary, 3],
+      [event.tags.join(' '), 2],
+      [event.quotes.join(' '), 2],
+      [event.narrative, 1],
+      [(event.temporal.participants ?? []).join(' '), 5],
+      [event.temporal.eventType ?? '', 5],
+      [event.temporal.originalText ?? '', 4],
+      [`${event.temporal.happenedStart ?? ''} ${event.temporal.happenedEnd ?? ''}`, 4],
+    ])).map(({ item }) => item);
+    const chronology = (event: EventCard): string => event.temporal.happenedStart
+      ?? event.temporal.happenedEnd
+      ?? event.temporal.mentionedAt
+      ?? event.createdAt;
+    const structured = (items: readonly EventCard[]): EventCard[] => [...items].sort((left, right) => {
+      if (options.temporalIntent === 'first') return chronology(left).localeCompare(chronology(right));
+      if (options.temporalIntent === 'latest') return chronology(right).localeCompare(chronology(left));
+      return memoryWeightAt(right, this.currentTurn) - memoryWeightAt(left, this.currentTurn)
+        || right.updatedAt.localeCompare(left.updatedAt);
+    });
+    const participantIds = new Set(participantMatches.map(({ id }) => id));
+    const typeIds = new Set(typeMatches.map(({ id }) => id));
+    const timeIds = new Set(timeMatches.map(({ id }) => id));
+    const hasStructuredFilter = participants.length > 0 || Boolean(eventType) || hasTimeFilter;
+    const exactStructuredMatches = hasStructuredFilter ? candidates.filter((event) =>
+      (participants.length === 0 || participantIds.has(event.id))
+      && (!eventType || typeIds.has(event.id))
+      && (!hasTimeFilter || timeIds.has(event.id))) : [];
+    const rankings: EventCard[][] = [];
+    if (exactStructuredMatches.length > 0) {
+      const exactIds = new Set(exactStructuredMatches.map(({ id }) => id));
+      rankings.push(bm25.filter(({ id }) => exactIds.has(id)), structured(exactStructuredMatches));
+    } else {
+      rankings.push(bm25);
+      if (participantMatches.length > 0) rankings.push(structured(participantMatches));
+      if (typeMatches.length > 0) rankings.push(structured(typeMatches));
+      if (timeMatches.length > 0) rankings.push(structured(timeMatches));
     }
+    if (searchTokens(query).length > 0 && bm25.length === 0 && !hasStructuredFilter) return [];
+    if (!rankings.some((ranking) => ranking.length > 0)) {
+      if (searchTokens(query).length > 0) return [];
+      rankings.push(structured(candidates));
+    }
+    const ranked = rrfRank(rankings).slice(0, limit).map(({ item: event, score }) => ({ event, score }));
     if (ranked.length > 0) {
       const now = this.now().toISOString();
       await this.commitMutation(() => {
@@ -321,14 +411,141 @@ export class StrataGate {
     return ranked;
   }
 
+  async claimNextElementProjection(): Promise<ElementProjectionContext | null> {
+    return this.commitMutation(() => {
+      const job = [...this.elementProjectionJobs.values()]
+        .find((candidate) => candidate.status === 'pending' || candidate.status === 'failed');
+      if (!job) return null;
+      const events = job.sourceEventIds.flatMap((id) => this.events.find((event) => event.id === id) ?? []);
+      if (events.length === 0) {
+        throw new Error(`Element projection ${job.id} has no available source events`);
+      }
+      job.status = 'running';
+      job.attempts += 1;
+      job.lastError = null;
+      job.updatedAt = this.now().toISOString();
+      return {
+        jobId: job.id,
+        events: structuredClone(events),
+        existingElements: structuredClone(this.elements),
+      };
+    });
+  }
+
+  async completeElementProjection(jobId: string, result: ElementProjectionResult): Promise<ElementCard[]> {
+    return this.commitMutation(() => {
+      const job = this.requireElementProjectionJob(jobId);
+      if (job.status === 'completed') {
+        return job.elementIds.flatMap((id) => this.elements.find((element) => element.id === id) ?? []);
+      }
+      if (job.status !== 'running') throw new Error(`Element projection ${job.id} is ${job.status}, not running`);
+      const touched = applyElementChanges({
+        elements: this.elements,
+        events: this.events,
+        changes: Array.isArray(result.changes) ? result.changes : [],
+        allowedEventIds: new Set(job.sourceEventIds),
+        now: this.now().toISOString(),
+        currentTurn: this.currentTurn,
+        idFactory: this.elementIdFactory,
+      });
+      job.status = 'completed';
+      job.elementIds = touched.map(({ id }) => id);
+      job.reason = typeof result.reason === 'string'
+        ? result.reason.trim().replace(/\s+/g, ' ').slice(0, 500) || null
+        : null;
+      job.lastError = null;
+      job.updatedAt = this.now().toISOString();
+      return touched;
+    });
+  }
+
+  async failElementProjection(jobId: string, error: unknown): Promise<void> {
+    await this.commitMutation(() => {
+      const job = this.requireElementProjectionJob(jobId);
+      if (job.status === 'completed') return;
+      job.status = 'failed';
+      job.lastError = errorMessage(error);
+      job.updatedAt = this.now().toISOString();
+    });
+  }
+
+  async searchElements(query: string, options: ElementSearchOptions = {}): Promise<ElementSearchResult[]> {
+    const normalizedName = normalizeSearchText(options.name ?? '');
+    const candidates = this.elements.flatMap((element) => element.facts.map((fact) => ({
+      id: fact.id,
+      elementId: element.id,
+      name: element.name,
+      aliases: element.aliases,
+      type: element.type,
+      fact,
+      updatedAt: element.updatedAt,
+    })));
+    const bm25 = bm25Rank(candidates, query, (hit) => weightedSearchTokens([
+      [hit.name, 5],
+      [hit.aliases.join(' '), 4],
+      [hit.type, 2],
+      [hit.fact.key, 4],
+      [Array.isArray(hit.fact.value) ? hit.fact.value.join(' ') : hit.fact.value, 5],
+    ])).map(({ item }) => item);
+    const nameMatches = normalizedName ? candidates.filter((hit) =>
+      fuzzySearchMatch(hit.name, normalizedName)
+      || hit.aliases.some((alias) => fuzzySearchMatch(alias, normalizedName))) : [];
+    const typeMatches = options.type ? candidates.filter((hit) => hit.type === options.type) : [];
+    const recent = (items: typeof candidates): typeof candidates => [...items]
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+    const hasStructuredFilter = Boolean(normalizedName || options.type);
+    const nameIds = new Set(nameMatches.map(({ id }) => id));
+    const typeIds = new Set(typeMatches.map(({ id }) => id));
+    const exactStructuredMatches = hasStructuredFilter ? candidates.filter((hit) =>
+      (!normalizedName || nameIds.has(hit.id)) && (!options.type || typeIds.has(hit.id))) : [];
+    const rankings: typeof candidates[] = [];
+    if (exactStructuredMatches.length > 0) {
+      const exactIds = new Set(exactStructuredMatches.map(({ id }) => id));
+      rankings.push(bm25.filter(({ id }) => exactIds.has(id)), recent(exactStructuredMatches));
+    } else {
+      rankings.push(bm25);
+      if (nameMatches.length > 0) rankings.push(recent(nameMatches));
+      if (typeMatches.length > 0) rankings.push(recent(typeMatches));
+    }
+    if (searchTokens(query).length > 0 && bm25.length === 0 && !hasStructuredFilter) return [];
+    if (!rankings.some((ranking) => ranking.length > 0)) {
+      if (searchTokens(query).length > 0) return [];
+      rankings.push(recent(candidates));
+    }
+    const ranked = rrfRank(rankings).slice(0, Math.max(1, Math.min(12, options.limit ?? 8)));
+    if (ranked.length > 0) {
+      const now = this.now().toISOString();
+      await this.commitMutation(() => {
+        for (const elementId of new Set(ranked.map(({ item }) => item.elementId))) {
+          const element = this.elements.find(({ id }) => id === elementId);
+          if (element) element.weight.lastRetrievedAt = now;
+        }
+      });
+    }
+    return ranked.map(({ item, score }) => ({
+      id: item.id,
+      elementId: item.elementId,
+      name: item.name,
+      type: item.type,
+      fact: item.fact,
+      score,
+    }));
+  }
+
+  expandElement(id: string, at?: string): ElementCard {
+    const element = this.elements.find((candidate) => candidate.id === id);
+    if (!element) throw new Error(`Unknown element: ${id}`);
+    return elementViewAt(element, at);
+  }
+
   searchRawMemory(query: string, limit = 6): RawSearchHit[] {
-    const tokens = queryTokens(query);
+    const tokens = searchTokens(query);
     if (tokens.length === 0) return [];
     const hits: RawSearchHit[] = [];
     for (const block of this.blocks) {
       for (const [index, message] of block.l5Raw.entries()) {
-        const text = normalizeText(message.content);
-        if (!tokens.some((token) => text.includes(token))) continue;
+        const messageTokens = new Set(searchTokens(message.content));
+        if (!tokens.some((token) => messageTokens.has(token))) continue;
         hits.push({
           blockId: block.id,
           turnRange: [block.startTurn, block.endTurn],
@@ -379,15 +596,20 @@ export class StrataGate {
     return normalizeRetrievalAssessment(input, latestEvidenceRefs);
   }
 
-  async recordMemoryUse(eventIds: readonly string[], options: RecordMemoryUseOptions = {}): Promise<void> {
+  async recordMemoryUse(refs: readonly string[] | MemoryUseRefs, options: RecordMemoryUseOptions = {}): Promise<void> {
     const receiptId = options.receiptId?.trim();
     if (this.storage && !receiptId) throw new TypeError('Persistent recordMemoryUse requires a non-empty receiptId');
-    const requestedIds = [...new Set(eventIds)];
+    const normalizedRefs: MemoryUseRefs = Array.isArray(refs)
+      ? { eventIds: refs as readonly string[] }
+      : refs as MemoryUseRefs;
+    const requestedEventIds = [...new Set(normalizedRefs.eventIds ?? [])];
+    const requestedElementIds = [...new Set(normalizedRefs.elementIds ?? [])];
     if (receiptId) {
       const existing = this.usageReceipts.get(receiptId);
       if (existing) {
-        if (!sameIds(existing.eventIds, requestedIds)) {
-          throw new Error(`Usage receipt ${receiptId} was already recorded with different event IDs`);
+        if (!sameIds(existing.eventIds, requestedEventIds)
+          || !sameIds(existing.elementIds, requestedElementIds)) {
+          throw new Error(`Usage receipt ${receiptId} was already recorded with different memory IDs`);
         }
         return;
       }
@@ -395,14 +617,26 @@ export class StrataGate {
 
     await this.commitMutation(() => {
       const now = this.now().toISOString();
-      for (const id of requestedIds) {
+      for (const id of requestedEventIds) {
         const event = this.events.find((candidate) => candidate.id === id);
         if (!event || event.status === 'forgotten' || event.status === 'archived') continue;
         event.weight.mentionCount += 1;
         event.weight.lastAdoptedTurn = this.currentTurn;
         event.updatedAt = now;
       }
-      if (receiptId) this.usageReceipts.set(receiptId, { id: receiptId, eventIds: requestedIds, createdAt: now });
+      for (const id of requestedElementIds) {
+        const element = this.elements.find((candidate) => candidate.id === id);
+        if (!element) continue;
+        element.weight.mentionCount += 1;
+        element.weight.lastAdoptedTurn = this.currentTurn;
+        element.updatedAt = now;
+      }
+      if (receiptId) this.usageReceipts.set(receiptId, {
+        id: receiptId,
+        eventIds: requestedEventIds,
+        elementIds: requestedElementIds,
+        createdAt: now,
+      });
     });
   }
 
@@ -486,6 +720,31 @@ export class StrataGate {
     const event = this.events.find((candidate) => candidate.id === id);
     if (!event) throw new Error(`Unknown event: ${id}`);
     return event;
+  }
+
+  private requireElementProjectionJob(id: string): ElementProjectionJob {
+    const job = this.elementProjectionJobs.get(id);
+    if (!job) throw new Error(`Unknown element projection: ${id}`);
+    return job;
+  }
+
+  private queueElementProjection(sourceEventIds: readonly string[]): ElementProjectionJob | null {
+    const ids = [...new Set(sourceEventIds.filter((id) => this.events.some((event) => event.id === id)))];
+    if (ids.length === 0) return null;
+    const now = this.now().toISOString();
+    const job: ElementProjectionJob = {
+      id: this.elementIdFactory('proj'),
+      sourceEventIds: ids,
+      status: 'pending',
+      attempts: 0,
+      elementIds: [],
+      reason: null,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.elementProjectionJobs.set(job.id, job);
+    return job;
   }
 
   private pendingBlockMessages(): RawMessage[] {
@@ -592,6 +851,7 @@ export class StrataGate {
       const extracted = result.shouldExtract
         ? result.events.map((event) => this.addEventInMemory({ ...event, sourceBlockId: target.id }))
         : [];
+      if (extracted.length > 0) this.queueElementProjection(extracted.map(({ id }) => id));
       const job = this.extractionJobs.get(target.id);
       if (!job) throw new Error(`Missing extraction job for block: ${target.id}`);
       this.extractionJobs.set(target.id, {
@@ -602,6 +862,19 @@ export class StrataGate {
       });
       return extracted;
     });
+  }
+
+  private async projectEligibleElements(): Promise<ElementCard[] | null> {
+    if (!this.elementProjector) return null;
+    const batch = await this.claimNextElementProjection();
+    if (!batch) return null;
+    try {
+      const result = await this.elementProjector(batch);
+      return await this.completeElementProjection(batch.jobId, result);
+    } catch (error) {
+      await this.failElementProjection(batch.jobId, error);
+      throw error;
+    }
   }
 
   private async commitMutation<T>(mutation: () => T | Promise<T>): Promise<T> {
@@ -640,17 +913,20 @@ export class StrataGate {
   }
 
   private restoreSnapshot(snapshot: StrataGateSnapshot): void {
-    assertValidSnapshot(snapshot);
-    if (snapshot.blockTurnSize !== this.blockTurnSize) {
-      throw new Error(`Snapshot blockTurnSize ${snapshot.blockTurnSize} does not match ${this.blockTurnSize}`);
+    const normalized = normalizeSnapshot(snapshot);
+    if (normalized.blockTurnSize !== this.blockTurnSize) {
+      throw new Error(`Snapshot blockTurnSize ${normalized.blockTurnSize} does not match ${this.blockTurnSize}`);
     }
-    const copy = cloneSnapshot(snapshot);
+    const copy = cloneSnapshot(normalized);
     this.currentTurn = copy.currentTurn;
     this.openTail.splice(0, this.openTail.length, ...copy.openTail);
     this.blocks.splice(0, this.blocks.length, ...copy.blocks);
     this.events.splice(0, this.events.length, ...copy.events);
+    this.elements.splice(0, this.elements.length, ...copy.elements);
     this.extractionJobs.clear();
     for (const job of copy.extractionJobs) this.extractionJobs.set(job.blockId, job);
+    this.elementProjectionJobs.clear();
+    for (const job of copy.elementProjectionJobs) this.elementProjectionJobs.set(job.id, job);
     this.usageReceipts.clear();
     for (const receipt of copy.usageReceipts) this.usageReceipts.set(receipt.id, receipt);
     this.validateReferences();
@@ -684,6 +960,34 @@ export class StrataGate {
     }
     for (const job of this.extractionJobs.values()) {
       if (!blockIds.has(job.blockId)) throw new Error(`Unknown extraction job block in snapshot: ${job.blockId}`);
+    }
+    const elementIds = new Set<string>();
+    for (const element of this.elements) {
+      if (elementIds.has(element.id)) throw new Error(`Duplicate element ID in snapshot: ${element.id}`);
+      elementIds.add(element.id);
+      for (const eventId of element.sourceEventIds) {
+        if (!eventIds.has(eventId)) throw new Error(`Element ${element.id} references unknown event ${eventId}`);
+      }
+      const sourceMessageIds = new Set(element.sourceEventIds.flatMap((eventId) =>
+        this.events.find((event) => event.id === eventId)?.sourceMessageIds ?? []));
+      for (const messageId of element.sourceMessageIds) {
+        if (!sourceMessageIds.has(messageId)) {
+          throw new Error(`Element ${element.id} references message ${messageId} outside its source events`);
+        }
+      }
+      for (const fact of element.facts) {
+        for (const eventId of fact.sourceEventIds) {
+          if (!eventIds.has(eventId)) throw new Error(`Element fact ${fact.id} references unknown event ${eventId}`);
+        }
+      }
+    }
+    for (const job of this.elementProjectionJobs.values()) {
+      for (const eventId of job.sourceEventIds) {
+        if (!eventIds.has(eventId)) throw new Error(`Element projection ${job.id} references unknown event ${eventId}`);
+      }
+      for (const elementId of job.elementIds) {
+        if (!elementIds.has(elementId)) throw new Error(`Element projection ${job.id} references unknown element ${elementId}`);
+      }
     }
   }
 }

@@ -1,6 +1,6 @@
-import type { EventCard, MemoryBlock, RawMessage } from './types.js';
+import type { ElementCard, EventCard, MemoryBlock, RawMessage } from './types.js';
 
-export const STRATAGATE_STORAGE_SCHEMA_VERSION = 1;
+export const STRATAGATE_STORAGE_SCHEMA_VERSION = 2;
 
 export type ExtractionJobStatus = 'running' | 'succeeded' | 'skipped' | 'failed';
 
@@ -12,9 +12,24 @@ export interface ExtractionJob {
   updatedAt: string;
 }
 
+export type ElementProjectionJobStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface ElementProjectionJob {
+  id: string;
+  sourceEventIds: string[];
+  status: ElementProjectionJobStatus;
+  attempts: number;
+  elementIds: string[];
+  reason: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface UsageReceipt {
   id: string;
   eventIds: string[];
+  elementIds: string[];
   createdAt: string;
 }
 
@@ -25,7 +40,9 @@ export interface StrataGateSnapshot {
   openTail: RawMessage[];
   blocks: MemoryBlock[];
   events: EventCard[];
+  elements: ElementCard[];
   extractionJobs: ExtractionJob[];
+  elementProjectionJobs: ElementProjectionJob[];
   usageReceipts: UsageReceipt[];
 }
 
@@ -55,11 +72,30 @@ export function cloneSnapshot(snapshot: StrataGateSnapshot): StrataGateSnapshot 
   return structuredClone(snapshot);
 }
 
-export function assertValidSnapshot(value: unknown): asserts value is StrataGateSnapshot {
+interface LegacySnapshotV1 extends Omit<StrataGateSnapshot, 'schemaVersion' | 'elements' | 'elementProjectionJobs' | 'usageReceipts'> {
+  schemaVersion: 1;
+  usageReceipts: Array<Omit<UsageReceipt, 'elementIds'>>;
+}
+
+export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
   if (!value || typeof value !== 'object') throw new TypeError('Invalid StrataGate snapshot: expected an object');
-  const snapshot = value as Partial<StrataGateSnapshot>;
-  if (snapshot.schemaVersion !== STRATAGATE_STORAGE_SCHEMA_VERSION) {
-    throw new TypeError(`Unsupported StrataGate snapshot schema: ${String(snapshot.schemaVersion)}`);
+  const schemaVersion = (value as { schemaVersion?: unknown }).schemaVersion;
+  let snapshot: StrataGateSnapshot;
+  if (schemaVersion === 1) {
+    const legacy = value as LegacySnapshotV1;
+    snapshot = {
+      ...structuredClone(legacy),
+      schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
+      elements: [],
+      elementProjectionJobs: [],
+      usageReceipts: Array.isArray(legacy.usageReceipts)
+        ? legacy.usageReceipts.map((receipt) => ({ ...receipt, elementIds: [] }))
+        : [],
+    };
+  } else if (schemaVersion === STRATAGATE_STORAGE_SCHEMA_VERSION) {
+    snapshot = structuredClone(value) as StrataGateSnapshot;
+  } else {
+    throw new TypeError(`Unsupported StrataGate snapshot schema: ${String(schemaVersion)}`);
   }
   if (!Number.isSafeInteger(snapshot.currentTurn) || (snapshot.currentTurn ?? -1) < 0) {
     throw new TypeError('Invalid StrataGate snapshot: currentTurn must be a non-negative integer');
@@ -67,7 +103,12 @@ export function assertValidSnapshot(value: unknown): asserts value is StrataGate
   if (!Number.isSafeInteger(snapshot.blockTurnSize) || (snapshot.blockTurnSize ?? 0) < 1) {
     throw new TypeError('Invalid StrataGate snapshot: blockTurnSize must be a positive integer');
   }
-  for (const key of ['openTail', 'blocks', 'events', 'extractionJobs', 'usageReceipts'] as const) {
+  for (const key of ['openTail', 'blocks', 'events', 'elements', 'extractionJobs', 'elementProjectionJobs', 'usageReceipts'] as const) {
     if (!Array.isArray(snapshot[key])) throw new TypeError(`Invalid StrataGate snapshot: ${key} must be an array`);
   }
+  return snapshot;
+}
+
+export function assertValidSnapshot(value: unknown): asserts value is StrataGateSnapshot {
+  normalizeSnapshot(value);
 }

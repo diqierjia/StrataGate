@@ -4,6 +4,7 @@ import {
   StorageConflictError,
   assertValidSnapshot,
   cloneSnapshot,
+  type ElementProjectionJob,
   type ExtractionJob,
   type LoadedStrataGateState,
   type StorageAdapter,
@@ -12,12 +13,17 @@ import {
 } from './storage.js';
 import type {
   BlockLevel,
+  ElementCard,
+  ElementFact,
+  ElementFactMode,
+  ElementFactStatus,
   EventCard,
   EventTemporal,
   MemoryBlock,
   MemoryCriticality,
   MemoryScope,
   MemoryStatus,
+  MemoryElementType,
   RawMessage,
   ToolTrace,
 } from './types.js';
@@ -106,7 +112,64 @@ interface ExtractionJobRow {
 interface UsageReceiptRow {
   receipt_id: string;
   event_ids_json: string;
+  element_ids_json: string;
   created_at: string;
+}
+
+interface ElementRow {
+  id: string;
+  position: number;
+  name: string;
+  type: MemoryElementType;
+  aliases_json: string;
+  current_state: string;
+  mention_count: number;
+  last_adopted_turn: number;
+  last_retrieved_at: string | null;
+  pinned: number;
+  floor_weight: number;
+  forced_cap: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ElementFactRow {
+  id: string;
+  element_id: string;
+  position: number;
+  key: string;
+  mode: ElementFactMode;
+  value_json: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  confidence: number | null;
+  status: ElementFactStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ElementSourceRow {
+  element_id: string;
+  event_id: string;
+  position: number;
+}
+
+interface ElementFactSourceRow {
+  fact_id: string;
+  event_id: string;
+  position: number;
+}
+
+interface ElementProjectionJobRow {
+  id: string;
+  source_event_ids_json: string;
+  status: ElementProjectionJob['status'];
+  attempts: number;
+  element_ids_json: string;
+  reason: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const SCHEMA = `
@@ -197,6 +260,64 @@ CREATE TABLE IF NOT EXISTS event_sources (
   FOREIGN KEY (namespace, message_id) REFERENCES messages(namespace, id)
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS elements (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  aliases_json TEXT NOT NULL,
+  current_state TEXT NOT NULL,
+  mention_count INTEGER NOT NULL,
+  last_adopted_turn INTEGER NOT NULL,
+  last_retrieved_at TEXT,
+  pinned INTEGER NOT NULL,
+  floor_weight REAL NOT NULL,
+  forced_cap REAL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (namespace, id),
+  FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS element_sources (
+  namespace TEXT NOT NULL,
+  element_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (namespace, element_id, event_id),
+  FOREIGN KEY (namespace, element_id) REFERENCES elements(namespace, id) ON DELETE CASCADE,
+  FOREIGN KEY (namespace, event_id) REFERENCES events(namespace, id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS element_facts (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  element_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  valid_from TEXT,
+  valid_to TEXT,
+  confidence REAL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (namespace, id),
+  FOREIGN KEY (namespace, element_id) REFERENCES elements(namespace, id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS element_fact_sources (
+  namespace TEXT NOT NULL,
+  fact_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (namespace, fact_id, event_id),
+  FOREIGN KEY (namespace, fact_id) REFERENCES element_facts(namespace, id) ON DELETE CASCADE,
+  FOREIGN KEY (namespace, event_id) REFERENCES events(namespace, id)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS extraction_jobs (
   namespace TEXT NOT NULL,
   block_id TEXT NOT NULL,
@@ -208,10 +329,26 @@ CREATE TABLE IF NOT EXISTS extraction_jobs (
   FOREIGN KEY (namespace, block_id) REFERENCES blocks(namespace, id) ON DELETE CASCADE
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS element_projection_jobs (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  source_event_ids_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempts INTEGER NOT NULL,
+  element_ids_json TEXT NOT NULL,
+  reason TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (namespace, id),
+  FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS usage_receipts (
   namespace TEXT NOT NULL,
   receipt_id TEXT NOT NULL,
   event_ids_json TEXT NOT NULL,
+  element_ids_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY (namespace, receipt_id),
   FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
@@ -355,6 +492,78 @@ export class SqliteStorage implements StorageAdapter {
       updatedAt: row.updated_at,
     }));
 
+    const elementSourceRows = this.database.prepare(`
+      SELECT element_id, event_id, position FROM element_sources
+      WHERE namespace = ? ORDER BY element_id, position
+    `).all(key) as ElementSourceRow[];
+    const sourcesByElement = new Map<string, string[]>();
+    for (const row of elementSourceRows) {
+      const ids = sourcesByElement.get(row.element_id) ?? [];
+      ids.push(row.event_id);
+      sourcesByElement.set(row.element_id, ids);
+    }
+
+    const elementFactSourceRows = this.database.prepare(`
+      SELECT fact_id, event_id, position FROM element_fact_sources
+      WHERE namespace = ? ORDER BY fact_id, position
+    `).all(key) as ElementFactSourceRow[];
+    const sourcesByFact = new Map<string, string[]>();
+    for (const row of elementFactSourceRows) {
+      const ids = sourcesByFact.get(row.fact_id) ?? [];
+      ids.push(row.event_id);
+      sourcesByFact.set(row.fact_id, ids);
+    }
+
+    const elementFactRows = this.database.prepare(`
+      SELECT * FROM element_facts WHERE namespace = ? ORDER BY element_id, position
+    `).all(key) as ElementFactRow[];
+    const factsByElement = new Map<string, ElementFact[]>();
+    for (const row of elementFactRows) {
+      const facts = factsByElement.get(row.element_id) ?? [];
+      facts.push({
+        id: row.id,
+        key: row.key,
+        mode: row.mode,
+        value: parseJson<string | string[]>(row.value_json, 'element_facts.value_json'),
+        ...(row.valid_from ? { validFrom: row.valid_from } : {}),
+        ...(row.valid_to ? { validTo: row.valid_to } : {}),
+        sourceEventIds: sourcesByFact.get(row.id) ?? [],
+        ...(row.confidence === null ? {} : { confidence: row.confidence }),
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      });
+      factsByElement.set(row.element_id, facts);
+    }
+
+    const elementRows = this.database.prepare(`
+      SELECT * FROM elements WHERE namespace = ? ORDER BY position
+    `).all(key) as ElementRow[];
+    const messagesByEvent = new Map(events.map((event) => [event.id, event.sourceMessageIds]));
+    const elements: ElementCard[] = elementRows.map((row) => {
+      const sourceEventIds = sourcesByElement.get(row.id) ?? [];
+      return {
+        id: row.id,
+        name: row.name,
+        type: row.type,
+        aliases: parseJson<string[]>(row.aliases_json, 'elements.aliases_json'),
+        currentState: row.current_state,
+        facts: factsByElement.get(row.id) ?? [],
+        sourceEventIds,
+        sourceMessageIds: [...new Set(sourceEventIds.flatMap((id) => messagesByEvent.get(id) ?? []))],
+        weight: {
+          mentionCount: row.mention_count,
+          lastAdoptedTurn: row.last_adopted_turn,
+          lastRetrievedAt: row.last_retrieved_at,
+          pinned: Boolean(row.pinned),
+          floorWeight: row.floor_weight,
+          forcedCap: row.forced_cap,
+        },
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
+
     const extractionJobs = (this.database.prepare(`
       SELECT block_id, status, attempts, last_error, updated_at
       FROM extraction_jobs WHERE namespace = ? ORDER BY block_id
@@ -366,12 +575,28 @@ export class SqliteStorage implements StorageAdapter {
       updatedAt: row.updated_at,
     }));
 
+    const elementProjectionJobs = (this.database.prepare(`
+      SELECT id, source_event_ids_json, status, attempts, element_ids_json, reason, last_error, created_at, updated_at
+      FROM element_projection_jobs WHERE namespace = ? ORDER BY created_at, id
+    `).all(key) as ElementProjectionJobRow[]).map<ElementProjectionJob>((row) => ({
+      id: row.id,
+      sourceEventIds: parseJson<string[]>(row.source_event_ids_json, 'element_projection_jobs.source_event_ids_json'),
+      status: row.status,
+      attempts: row.attempts,
+      elementIds: parseJson<string[]>(row.element_ids_json, 'element_projection_jobs.element_ids_json'),
+      reason: row.reason,
+      lastError: row.last_error,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+
     const usageReceipts = (this.database.prepare(`
-      SELECT receipt_id, event_ids_json, created_at
+      SELECT receipt_id, event_ids_json, element_ids_json, created_at
       FROM usage_receipts WHERE namespace = ? ORDER BY created_at, receipt_id
     `).all(key) as UsageReceiptRow[]).map<UsageReceipt>((row) => ({
       id: row.receipt_id,
       eventIds: parseJson<string[]>(row.event_ids_json, 'usage_receipts.event_ids_json'),
+      elementIds: parseJson<string[]>(row.element_ids_json, 'usage_receipts.element_ids_json'),
       createdAt: row.created_at,
     }));
 
@@ -382,7 +607,9 @@ export class SqliteStorage implements StorageAdapter {
       openTail,
       blocks,
       events,
+      elements,
       extractionJobs,
+      elementProjectionJobs,
       usageReceipts,
     };
     assertValidSnapshot(snapshot);
@@ -584,6 +811,94 @@ export class SqliteStorage implements StorageAdapter {
       }
     }
 
+    const insertElement = this.database.prepare(`
+      INSERT INTO elements (
+        namespace, id, position, name, type, aliases_json, current_state,
+        mention_count, last_adopted_turn, last_retrieved_at, pinned, floor_weight, forced_cap,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (namespace, id) DO UPDATE SET
+        position = excluded.position,
+        name = excluded.name,
+        type = excluded.type,
+        aliases_json = excluded.aliases_json,
+        current_state = excluded.current_state,
+        mention_count = excluded.mention_count,
+        last_adopted_turn = excluded.last_adopted_turn,
+        last_retrieved_at = excluded.last_retrieved_at,
+        pinned = excluded.pinned,
+        floor_weight = excluded.floor_weight,
+        forced_cap = excluded.forced_cap,
+        updated_at = excluded.updated_at
+    `);
+    const insertElementSource = this.database.prepare(`
+      INSERT INTO element_sources (namespace, element_id, event_id, position) VALUES (?, ?, ?, ?)
+      ON CONFLICT (namespace, element_id, event_id) DO UPDATE SET position = excluded.position
+    `);
+    const insertElementFact = this.database.prepare(`
+      INSERT INTO element_facts (
+        namespace, id, element_id, position, key, mode, value_json, valid_from, valid_to,
+        confidence, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (namespace, id) DO UPDATE SET
+        element_id = excluded.element_id,
+        position = excluded.position,
+        key = excluded.key,
+        mode = excluded.mode,
+        value_json = excluded.value_json,
+        valid_from = excluded.valid_from,
+        valid_to = excluded.valid_to,
+        confidence = excluded.confidence,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+    `);
+    const insertElementFactSource = this.database.prepare(`
+      INSERT INTO element_fact_sources (namespace, fact_id, event_id, position) VALUES (?, ?, ?, ?)
+      ON CONFLICT (namespace, fact_id, event_id) DO UPDATE SET position = excluded.position
+    `);
+    for (const [elementPosition, element] of snapshot.elements.entries()) {
+      insertElement.run(
+        namespace,
+        element.id,
+        elementPosition,
+        element.name,
+        element.type,
+        JSON.stringify(element.aliases),
+        element.currentState,
+        element.weight.mentionCount,
+        element.weight.lastAdoptedTurn,
+        element.weight.lastRetrievedAt,
+        Number(element.weight.pinned),
+        element.weight.floorWeight,
+        element.weight.forcedCap,
+        element.createdAt,
+        element.updatedAt,
+      );
+      for (const [position, eventId] of element.sourceEventIds.entries()) {
+        insertElementSource.run(namespace, element.id, eventId, position);
+      }
+      for (const [factPosition, fact] of element.facts.entries()) {
+        insertElementFact.run(
+          namespace,
+          fact.id,
+          element.id,
+          factPosition,
+          fact.key,
+          fact.mode,
+          JSON.stringify(fact.value),
+          fact.validFrom ?? null,
+          fact.validTo ?? null,
+          fact.confidence ?? null,
+          fact.status,
+          fact.createdAt,
+          fact.updatedAt,
+        );
+        for (const [position, eventId] of fact.sourceEventIds.entries()) {
+          insertElementFactSource.run(namespace, fact.id, eventId, position);
+        }
+      }
+    }
+
     const insertJob = this.database.prepare(`
       INSERT INTO extraction_jobs (
         namespace, block_id, status, attempts, last_error, updated_at
@@ -598,13 +913,48 @@ export class SqliteStorage implements StorageAdapter {
       insertJob.run(namespace, job.blockId, job.status, job.attempts, job.lastError, job.updatedAt);
     }
 
+    const insertElementProjectionJob = this.database.prepare(`
+      INSERT INTO element_projection_jobs (
+        namespace, id, source_event_ids_json, status, attempts, element_ids_json,
+        reason, last_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (namespace, id) DO UPDATE SET
+        source_event_ids_json = excluded.source_event_ids_json,
+        status = excluded.status,
+        attempts = excluded.attempts,
+        element_ids_json = excluded.element_ids_json,
+        reason = excluded.reason,
+        last_error = excluded.last_error,
+        updated_at = excluded.updated_at
+    `);
+    for (const job of snapshot.elementProjectionJobs) {
+      insertElementProjectionJob.run(
+        namespace,
+        job.id,
+        JSON.stringify(job.sourceEventIds),
+        job.status,
+        job.attempts,
+        JSON.stringify(job.elementIds),
+        job.reason,
+        job.lastError,
+        job.createdAt,
+        job.updatedAt,
+      );
+    }
+
     const insertReceipt = this.database.prepare(`
-      INSERT INTO usage_receipts (namespace, receipt_id, event_ids_json, created_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO usage_receipts (namespace, receipt_id, event_ids_json, element_ids_json, created_at)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT (namespace, receipt_id) DO NOTHING
     `);
     for (const receipt of snapshot.usageReceipts) {
-      insertReceipt.run(namespace, receipt.id, JSON.stringify(receipt.eventIds), receipt.createdAt);
+      insertReceipt.run(
+        namespace,
+        receipt.id,
+        JSON.stringify(receipt.eventIds),
+        JSON.stringify(receipt.elementIds),
+        receipt.createdAt,
+      );
     }
 
     return nextRevision;
@@ -618,6 +968,18 @@ export class SqliteStorage implements StorageAdapter {
     if (version === 0) {
       const migrate = this.database.transaction(() => {
         this.database.exec(SCHEMA);
+        this.database.pragma(`user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
+      });
+      migrate.immediate();
+    } else if (version === 1) {
+      const migrate = this.database.transaction(() => {
+        const receiptColumns = this.database.pragma('table_info(usage_receipts)') as Array<{ name: string }>;
+        if (!receiptColumns.some(({ name }) => name === 'element_ids_json')) {
+          this.database.exec("ALTER TABLE usage_receipts ADD COLUMN element_ids_json TEXT NOT NULL DEFAULT '[]'");
+        }
+        this.database.exec(SCHEMA);
+        this.database.prepare('UPDATE memory_spaces SET schema_version = ? WHERE schema_version = 1')
+          .run(STRATAGATE_STORAGE_SCHEMA_VERSION);
         this.database.pragma(`user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
       });
       migrate.immediate();

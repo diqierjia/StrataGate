@@ -15,8 +15,12 @@ flowchart TB
 
     subgraph Derived["Derived memory"]
       E["Temporal event cards"]
+      P["Retryable element projection"]
+      C["Current element cards"]
       W["Adoption-based weight state"]
+      E --> P --> C
       E --> W
+      C --> W
     end
 
     subgraph Retrieval["Retrieval control"]
@@ -31,11 +35,12 @@ flowchart TB
     B --> E
     L --> Retrieval
     E --> Retrieval
+    C --> Retrieval
     A -->|"sufficient"| U["Answer and usage receipt"]
     U --> W
 ```
 
-The data flow from blocks to event cards is one-way. Derived cards never rewrite their source block.
+The data flow from blocks to event cards and from events to element cards is one-way. Derived cards never rewrite their source block or source event.
 
 ## Conversation blocks
 
@@ -118,6 +123,29 @@ interface EventCard {
 
 `mentionedAt` answers when the conversation referred to the event. `happenedStart` and `happenedEnd` answer when the event itself occurred. Keeping these axes separate avoids treating the message timestamp as the event date.
 
+## Element-card projection
+
+Event cards are immutable history. Element cards are rebuildable materialized views across events for people, projects, organizations, tools, and places. Each element fact has one of three modes:
+
+- `state`: a new fact with the same key supersedes the previous active state;
+- `set`: new unique values are appended without replacing existing values;
+- `relation`: a new relation with the same key supersedes the previous active relation.
+
+Facts carry `validFrom`, optional `validTo`, confidence, and `sourceEventIds`. Replacing a state closes the previous fact's validity interval instead of deleting it. `expandElement(id, at)` can therefore reconstruct the view at an earlier time.
+
+Projection is a separate persisted job from event extraction. The runtime commits a `pending` job only after its events exist. It then claims the job, calls the application-provided projector outside the transaction, and atomically applies the result or records failure. Every proposed fact is ignored unless all of its source event IDs belong to the claimed batch. An interrupted `running` job becomes `failed` on restart and can be retried without re-extracting events.
+
+Applications that manage their own model loop may use `claimNextElementProjection()`, `completeElementProjection()`, and `failElementProjection()` directly. Supplying `elementProjector` lets `appendTurn()` and `resumePendingWork()` drive the same state machine automatically.
+
+## Hybrid retrieval
+
+Event and fact-level element search use two inspectable ranking sources:
+
+1. BM25 over field-weighted lexical tokens, including overlapping Han bigrams;
+2. structured rankings from fields such as participant, event type, time range, element name, and element type.
+
+Reciprocal-rank fusion combines the available rankings. A non-empty query with no lexical or structured match returns an empty result rather than all candidates. Element search returns the matched fact plus its element ID, validity interval, and event provenance; callers expand the full element card only when needed. The reference path does not use embeddings or vector similarity.
+
 ## Event weight and adoption
 
 Event decay uses:
@@ -154,6 +182,8 @@ interface RetrievalAssessment {
     | 'answer'
     | 'search_events'
     | 'expand_event'
+    | 'search_elements'
+    | 'expand_element'
     | 'search_raw_memory'
     | 'expand_block';
 }
@@ -169,7 +199,7 @@ If the retrieval budget ends without sufficient evidence, the caller should pass
 
 ## Storage adapters
 
-The default constructor is an in-memory reference store. `StrataGate.open()` can instead hydrate the same state machine from a `StorageAdapter`. The bundled `SqliteStorage` adapter persists normalized rows for memory spaces, messages, blocks, events, event sources, extraction jobs, and usage receipts.
+The default constructor is an in-memory reference store. `StrataGate.open()` can instead hydrate the same state machine from a `StorageAdapter`. The bundled `SqliteStorage` adapter persists normalized rows for memory spaces, messages, blocks, events, elements, facts, provenance links, extraction/projection jobs, and usage receipts.
 
 Every namespace has a monotonically increasing revision. A write supplies the revision it loaded; SQLite commits the new revision and all related rows in one immediate transaction. A stale process receives `StorageConflictError` rather than overwriting newer state.
 
@@ -178,7 +208,8 @@ External model calls are never made inside a database transaction:
 1. a completed raw turn is committed immediately;
 2. summarization runs outside the transaction, then sealing commits atomically;
 3. extraction first commits a running job, calls the extractor, then atomically commits either the event cards or a failed/skipped job state;
-4. `resumePendingWork()` retries only failed or interrupted work after restart.
+4. element projection follows the same claim/call/complete boundary after its source events are durable;
+5. `resumePendingWork()` retries only failed or interrupted work after restart.
 
 The adapter preserves these invariants:
 
@@ -186,7 +217,9 @@ The adapter preserves these invariants:
 - card provenance references an existing source block and message set;
 - search hits do not increment adoption state;
 - supersession retains the old event;
+- element state replacement retains the old fact and its validity interval;
+- every element and fact source references an existing immutable event;
 - forget is reversible unless an application explicitly implements irreversible deletion;
 - usage receipts are idempotent for one answer turn through a unique `receiptId`.
 
-SQLite uses WAL, foreign keys, and per-namespace optimistic concurrency. It does not provide encryption at rest. Search still uses the reference in-memory ranking after hydration, so enabling persistence does not silently change retrieval semantics. Database-native lexical/vector indexes and a Postgres implementation remain separate future work.
+SQLite schema v2 adds normalized element, fact, provenance, and projection-job tables. Opening a schema-v1 database migrates it in one transaction and preserves existing namespaces, blocks, events, jobs, and receipts. SQLite uses WAL, foreign keys, and per-namespace optimistic concurrency. It does not provide encryption at rest. Search still uses the reference in-memory ranking after hydration, so enabling persistence does not silently change retrieval semantics. Database-native lexical/vector indexes and a Postgres implementation remain separate future work.

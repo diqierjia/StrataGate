@@ -68,7 +68,7 @@ This is a single-conversation comparison on `conv-26`, not a full LoCoMo score. 
 
 ![StrataGate workflow: layered memory, event cards, and the evidence gate](docs/assets/stratagate-how-it-works.en.png)
 
-Conversations are sealed into layered memories at different levels of detail, and event cards with provenance and time are extracted from them. When a question arrives, the system retrieves evidence and assesses whether it is sufficient. If not, it continues by expanding events or returning to the original messages; it answers only after the evidence is sufficient.
+Conversations are sealed into layered memories at different levels of detail, and immutable event cards with provenance and time are extracted from them. Separately retryable element projection turns those events into current views of people, projects, organizations, tools, and places. When a question arrives, BM25 and structured rankings are fused with RRF across event and fact-level element search. The system then assesses whether the evidence is sufficient; if not, it expands a card or returns to the original messages.
 
 ## Core design
 
@@ -133,7 +133,15 @@ Event extraction is delayed: after block `N` is sealed, precise extraction waits
 
 This reduces the chance that context is cut at a block boundary while preventing facts from neighboring conversations from being written into the wrong event.
 
-### 3. Evidence gate: relevant does not mean sufficient
+### 3. Element cards and auditable hybrid retrieval
+
+Event cards preserve what happened. Element cards materialize what is currently true about a person, project, organization, tool, or place. Their facts have `state`, `set`, or `relation` semantics, valid intervals, and source event IDs.
+
+Element projection is an independent persisted job. A failed projection can be retried without extracting its events again. The projector may propose changes, but StrataGate applies a fact only when every cited event belongs to the claimed projection batch. Updating a state supersedes the old fact and closes its validity interval; it never rewrites the source event.
+
+`searchEvents()` and `searchElements()` use deterministic BM25 lexical ranking plus structured rankings such as participant, event type, element name, element type, and time. Reciprocal-rank fusion combines those lists. Element search returns fact-level hits instead of an entire potentially large card, and a lexical zero match returns no arbitrary candidates. This evaluated path does not use vector or semantic retrieval.
+
+### 4. Evidence gate: relevant does not mean sufficient
 
 A conventional retrieval system often hands several similar results directly to the answer model. StrataGate inserts a fixed protocol between retrieval and answering:
 
@@ -160,23 +168,25 @@ If the judgment is `partial` or `wrong`, the system can choose:
 ```text
 search_events
 expand_event
+search_elements
+expand_element
 search_raw_memory
 expand_block
 ```
 
 The evidence gate does not run the entire agent loop for the application. StrataGate supplies state, constraints, and validation; the integrating application still controls model calls, tool iteration, and the maximum retrieval budget.
 
-### 4. Separate retrieval from reinforcement
+### 5. Separate retrieval from reinforcement
 
 An event being retrieved does not mean that it helped the answer.
 
 Search therefore updates only observable retrieval records; it does not directly increase memory weight. After the answer is complete, the application explicitly calls:
 
 ```ts
-await memory.recordMemoryUse(eventIds);
+await memory.recordMemoryUse({ eventIds, elementIds });
 ```
 
-Only events that the answer actually used update their long-term weight.
+Only events and elements that the answer actually used update their long-term weight.
 
 This avoids a common feedback loop:
 
@@ -277,6 +287,8 @@ The repository has implemented and validated:
 
 - layered conversation blocks and their decay rules;
 - event cards with provenance, time, and conflict relationships;
+- independently retryable element-card projection with event-level provenance and historical state;
+- BM25/RRF event and fact-level element retrieval with structured rankings;
 - a bounded evidence gate whose constraints can be checked by code;
 - a weighting mechanism that separates retrieval hits from actual answer use;
 - automated tests, experiment records, and machine-readable evaluation results.
@@ -301,7 +313,9 @@ npm run build
 The main code and documentation entry points are:
 
 - [`examples/basic.ts`](examples/basic.ts): minimal code example;
-- [`src/store.ts`](src/store.ts): core state, lifecycle, and event retrieval;
+- [`src/store.ts`](src/store.ts): core state, event/element lifecycle, and retrieval;
+- [`src/elements.ts`](src/elements.ts): provenance-checked element projection and time views;
+- [`src/search.ts`](src/search.ts): deterministic BM25 token ranking and RRF fusion;
 - [`src/retrieval.ts`](src/retrieval.ts): evidence-gate normalization and constraint validation;
 - [`src/blocks.ts`](src/blocks.ts): layering rules and deterministic pruning;
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): complete system boundaries and implementation invariants;
@@ -313,7 +327,7 @@ The main code and documentation entry points are:
 
 | Resource | Contents |
 | --- | --- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data flow, layering rules, event-card protocol, evidence-gate constraints, weighting, and storage invariants |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data flow, layering rules, event/element protocols, hybrid retrieval, evidence-gate constraints, weighting, and storage invariants |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | R1–R8 experiments, model sensitivity, Mem0 comparison, failure analysis, and reporting boundaries |
 | [`benchmarks/locomo-conv26-r8-final.json`](benchmarks/locomo-conv26-r8-final.json) | Current result, per-stage statistics, run information, and source artifact hashes |
 | [`examples/basic.ts`](examples/basic.ts) | Minimal code example |
@@ -323,10 +337,12 @@ The main code and documentation entry points are:
 ```text
 src/
   blocks.ts       Conversation layering, deterministic pruning, and level decay
+  elements.ts     Provenance-checked element projection and temporal views
   retrieval.ts    Evidence-gate input, normalization, and constraint validation
+  search.ts       BM25 lexical ranking and reciprocal-rank fusion
   storage.ts      Persistent snapshots and the StorageAdapter protocol
   sqlite.ts       Optional transactional SQLite adapter
-  store.ts        In-memory state, event retrieval, and lifecycle
+  store.ts        In-memory state, event/element retrieval, and lifecycle
   types.ts        Data structures and model-adapter interfaces
   weights.ts      Adoption records, forgetting, and weighting rules
 

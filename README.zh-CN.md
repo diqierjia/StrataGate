@@ -68,7 +68,7 @@ StrataGate 的目标不是让 Agent 每次检索更多，而是让它知道：**
 
 ![StrataGate 工作流程：分层记忆、事件卡与证据门](docs/assets/stratagate-how-it-works.zh-CN.png)
 
-对话被封存为不同详细程度的分层记忆，并从中抽取带来源和时间的事件卡。问题到来后，系统先检索并判断证据是否充分；不足时继续展开事件或回查原始消息，证据充分后才回答。
+对话被封存为不同详细程度的分层记忆，并从中抽取带来源和时间、不可改写的事件卡。随后，独立且可重试的元素投影会根据事件生成“人物、项目、组织、工具、地点”的当前视图。问题到来后，事件检索与元素事实检索分别使用 BM25 和结构化排序，再通过 RRF 融合；系统继续判断证据是否充分，不足时展开卡片或回查原始消息。
 
 ## 核心设计
 
@@ -133,7 +133,15 @@ L0–L4 都是同一份来源的派生视图，不会覆盖或重写 L5。事件
 
 这样既能减少上下文被块边界切断的问题，又能阻止相邻对话中的事实被错误写入当前事件。
 
-### 3. 证据门：相关不等于充分
+### 3. 元素卡与可审计的混合检索
+
+事件卡保存“发生过什么”，元素卡投影“某个人、项目、组织、工具或地点当前是什么状态”。元素事实分为 `state`、`set`、`relation` 三类，同时保存有效时间范围和来源事件 ID。
+
+元素投影是独立的持久化任务。投影失败时，只重试这次投影，不会重新抽取已经成功写入的事件。投影器可以提出变更，但只有当一条事实引用的所有事件都属于当前投影批次时，StrataGate 才会落库。状态更新会把旧事实标记为已取代并关闭有效期，不会修改来源事件。
+
+`searchEvents()` 和 `searchElements()` 使用确定性的 BM25 词面排序，并结合参与者、事件类型、元素名称、元素类型和时间等结构化排序，再用 RRF 融合。元素检索按事实返回，不会直接塞回一整张可能很大的元素卡；真正零词面命中时也不会把全部候选当作结果返回。这条已评测路径不使用向量或语义检索。
+
+### 4. 证据门：相关不等于充分
 
 普通检索系统通常在返回若干相似结果后，直接把它们交给回答模型。StrataGate 在检索和回答之间增加了一层固定协议：
 
@@ -160,23 +168,25 @@ verdict · evidence_refs · fit · missing · next_strategy
 ```text
 search_events
 expand_event
+search_elements
+expand_element
 search_raw_memory
 expand_block
 ```
 
 证据门不负责替应用完成整个 Agent loop。StrataGate 提供状态、约束和校验，具体模型调用、工具循环和最大检索预算仍由接入方控制。
 
-### 4. 检索和强化分开
+### 5. 检索和强化分开
 
 一次事件被搜索到，不代表它真的帮助了答案。
 
 因此，搜索只更新可观测的检索记录，不会直接增加记忆权重。回答完成后，应用需要显式调用：
 
 ```ts
-await memory.recordMemoryUse(eventIds);
+await memory.recordMemoryUse({ eventIds, elementIds });
 ```
 
-只有真正被答案采用的事件才会更新长期权重。
+只有真正被答案采用的事件和元素才会更新长期权重。
 
 这样可以避免一个常见反馈循环：
 
@@ -277,6 +287,8 @@ StrataGate 目前是用于验证长期 Agent 记忆设计的研究型原型。
 
 - 分层对话块及其衰减规则；
 - 带来源、时间和冲突关系的事件卡；
+- 独立可重试、保留事件来源和历史状态的元素卡投影；
+- BM25/RRF 事件检索与元素事实级混合检索；
 - 长度有界、可由代码校验的证据门；
 - 检索命中与实际采用分离的权重机制；
 - 自动化测试、实验记录和机器可读评测结果。
@@ -301,7 +313,9 @@ npm run build
 代码与文档的主要入口：
 
 - [`examples/basic.ts`](examples/basic.ts)：最小代码示例；
-- [`src/store.ts`](src/store.ts)：核心状态、生命周期和事件检索；
+- [`src/store.ts`](src/store.ts)：核心状态、事件/元素生命周期和检索；
+- [`src/elements.ts`](src/elements.ts)：校验来源的元素投影与时间视图；
+- [`src/search.ts`](src/search.ts)：确定性 BM25 排序和 RRF 融合；
 - [`src/retrieval.ts`](src/retrieval.ts)：证据门规范化与约束校验；
 - [`src/blocks.ts`](src/blocks.ts)：分层规则与确定性精简；
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：完整系统边界与实现不变量；
@@ -313,7 +327,7 @@ npm run build
 
 | 资源 | 内容 |
 | --- | --- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 数据流、分层规则、事件卡协议、证据门约束、权重和存储不变量 |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 数据流、分层规则、事件/元素协议、混合检索、证据门约束、权重和存储不变量 |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | R1–R8 实验、模型敏感性、Mem0 对比、失败分析和报告边界 |
 | [`benchmarks/locomo-conv26-r8-final.json`](benchmarks/locomo-conv26-r8-final.json) | 当前结果、逐阶段统计、运行信息和源产物哈希 |
 | [`examples/basic.ts`](examples/basic.ts) | 最小代码示例 |
@@ -323,10 +337,12 @@ npm run build
 ```text
 src/
   blocks.ts       对话块分层、确定性精简和层级衰减
+  elements.ts     校验来源的元素投影和时间视图
   retrieval.ts    证据门输入、规范化和约束校验
+  search.ts       BM25 词面排序和 RRF 融合
   storage.ts      持久化快照和 StorageAdapter 协议
   sqlite.ts       可选的事务式 SQLite adapter
-  store.ts        内存状态、事件检索和生命周期
+  store.ts        内存状态、事件/元素检索和生命周期
   types.ts        数据结构和模型适配接口
   weights.ts      采用记录、遗忘和权重规则
 

@@ -126,15 +126,94 @@ export interface ExtractionResult {
 
 export type EventExtractor = (context: ExtractionContext) => Promise<ExtractionResult>;
 
+export type MemoryElementType = 'person' | 'project' | 'organization' | 'tool' | 'place';
+export type ElementFactMode = 'state' | 'set' | 'relation';
+export type ElementFactStatus = 'active' | 'superseded' | 'disputed';
+export type ElementProjectionOperation = 'set_state' | 'add_set_item' | 'set_relation';
+
+export interface ElementFact {
+  id: string;
+  key: string;
+  mode: ElementFactMode;
+  value: string | string[];
+  validFrom?: string;
+  validTo?: string;
+  sourceEventIds: string[];
+  confidence?: number;
+  status: ElementFactStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ElementCard {
+  id: string;
+  name: string;
+  type: MemoryElementType;
+  aliases: string[];
+  currentState: string;
+  facts: ElementFact[];
+  sourceEventIds: string[];
+  sourceMessageIds: string[];
+  weight: MemoryWeight;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ElementProjectionChange {
+  element: {
+    name: string;
+    type: MemoryElementType;
+    aliases?: string[];
+  };
+  operation: ElementProjectionOperation;
+  key: string;
+  mode: ElementFactMode;
+  value: string | string[];
+  validFrom?: string;
+  validTo?: string;
+  sourceEventIds: string[];
+  confidence?: number;
+}
+
+export interface ElementProjectionResult {
+  reason: string;
+  changes: ElementProjectionChange[];
+}
+
+export interface ElementProjectionContext {
+  jobId: string;
+  events: EventCard[];
+  existingElements: ElementCard[];
+}
+
+export type ElementProjector = (context: ElementProjectionContext) => Promise<ElementProjectionResult>;
+
 export interface SearchOptions {
   limit?: number;
-  temporalIntent?: boolean;
+  temporalIntent?: boolean | 'first' | 'latest';
   participants?: string[];
   eventType?: string;
+  happenedFrom?: string;
+  happenedTo?: string;
 }
 
 export interface EventSearchResult {
   event: EventCard;
+  score: number;
+}
+
+export interface ElementSearchOptions {
+  limit?: number;
+  name?: string;
+  type?: MemoryElementType;
+}
+
+export interface ElementSearchResult {
+  id: string;
+  elementId: string;
+  name: string;
+  type: MemoryElementType;
+  fact: ElementFact;
   score: number;
 }
 
@@ -148,4 +227,5 @@ export interface RawSearchHit {
 export interface AppendTurnResult {
   sealedBlock: MemoryBlock | null;
   extractedEvents: EventCard[];
+  projectedElements: ElementCard[];
 }

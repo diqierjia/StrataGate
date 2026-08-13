@@ -1,4 +1,9 @@
-import { StrataGate, type BlockSummarizer, type EventExtractor } from '../src/index.js';
+import {
+  StrataGate,
+  type BlockSummarizer,
+  type ElementProjector,
+  type EventExtractor,
+} from '../src/index.js';
 
 const summarize: BlockSummarizer = async (messages) => ({
   l0Title: 'API design discussion',
@@ -21,7 +26,27 @@ const extract: EventExtractor = async ({ target }) => ({
   }],
 });
 
-const memory = new StrataGate({ blockTurnSize: 1, summarizer: summarize, extractor: extract });
+// Element cards are a separately retryable materialized view. The callback may
+// call any model provider; StrataGate validates every proposed source event ID.
+const projectElements: ElementProjector = async ({ events }) => ({
+  reason: 'Update the current project view from the new immutable event.',
+  changes: events.map((event) => ({
+    element: { name: 'Public API', type: 'project' },
+    operation: 'set_state',
+    key: 'pagination',
+    mode: 'state',
+    value: 'cursor pagination',
+    sourceEventIds: [event.id],
+    confidence: 1,
+  })),
+});
+
+const memory = new StrataGate({
+  blockTurnSize: 1,
+  summarizer: summarize,
+  extractor: extract,
+  elementProjector: projectElements,
+});
 
 await memory.appendTurn({
   user: 'Let us use cursor pagination for the public API.',
@@ -36,7 +61,11 @@ await memory.appendTurn({
 });
 
 const results = await memory.searchEvents('How should the API paginate?');
-const evidence = new Set(results.map(({ event }) => event.id));
+const elementFacts = await memory.searchElements('current API pagination', { type: 'project' });
+const evidence = new Set([
+  ...results.map(({ event }) => event.id),
+  ...elementFacts.map(({ id }) => id),
+]);
 const assessment = memory.assessRetrieval({
   verdict: 'sufficient',
   evidence_refs: [...evidence],
@@ -46,6 +75,9 @@ const assessment = memory.assessRetrieval({
 }, evidence);
 
 if (assessment.verdict === 'sufficient') {
-  await memory.recordMemoryUse(assessment.evidenceRefs);
-  console.log(results[0]?.event.summary);
+  await memory.recordMemoryUse({
+    eventIds: results.map(({ event }) => event.id),
+    elementIds: [...new Set(elementFacts.map(({ elementId }) => elementId))],
+  });
+  console.log(elementFacts[0]?.fact.value ?? results[0]?.event.summary);
 }
