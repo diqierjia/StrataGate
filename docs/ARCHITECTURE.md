@@ -199,7 +199,7 @@ If the retrieval budget ends without sufficient evidence, the caller should pass
 
 ## Storage adapters
 
-The default constructor is an in-memory reference store. `StrataGate.open()` can instead hydrate the same state machine from a `StorageAdapter`. The bundled `SqliteStorage` adapter persists normalized rows for memory spaces, messages, blocks, events, elements, facts, provenance links, extraction/projection jobs, and usage receipts.
+`StrataGate.open({ database, namespace })` is the normal public entrypoint and always hydrates the state machine from transactional SQLite storage. `StrataGate.inMemory()` is an explicit test and ephemeral-use mode. Advanced integrations may supply another durable `StorageAdapter` through `StrataGate.openWithStorage()`. The bundled `SqliteStorage` adapter persists normalized rows for memory spaces, messages, blocks, events, elements, facts, provenance links, extraction/projection jobs, usage receipts, and idempotent external-turn ingestion receipts.
 
 Every namespace has a monotonically increasing revision. A write supplies the revision it loaded; SQLite commits the new revision and all related rows in one immediate transaction. A stale process receives `StorageConflictError` rather than overwriting newer state.
 

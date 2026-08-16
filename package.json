@@ -20,10 +20,16 @@
     "README.md",
     "LICENSE"
   ],
+  "workspaces": [
+    "integrations/*"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:dsh": "npm run build --workspace stratagate-dsh",
     "check": "tsc -p tsconfig.json --noEmit",
+    "check:dsh": "npm run check --workspace stratagate-dsh",
     "test": "vitest run",
+    "test:dsh": "npm run test --workspace stratagate-dsh",
     "test:watch": "vitest",
     "prepare": "npm run build"
   },
@@ -39,15 +45,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/diqierjia/StrataGate.git"
+    "url": "git+https://github.com/diqierjia/StrataGate-AgentMemory.git"
   },
   "bugs": {
-    "url": "https://github.com/diqierjia/StrataGate/issues"
+    "url": "https://github.com/diqierjia/StrataGate-AgentMemory/issues"
   },
-  "homepage": "https://github.com/diqierjia/StrataGate#readme",
+  "homepage": "https://github.com/diqierjia/StrataGate-AgentMemory#readme",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -55,13 +61,5 @@
     "better-sqlite3": "^12.11.1",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
-  },
-  "peerDependencies": {
-    "better-sqlite3": "^12.11.1"
-  },
-  "peerDependenciesMeta": {
-    "better-sqlite3": {
-      "optional": true
-    }
   }
 }

@@ -41,7 +41,9 @@ const projectElements: ElementProjector = async ({ events }) => ({
   })),
 });
 
-const memory = new StrataGate({
+const memory = await StrataGate.open({
+  database: './stratagate-example.db',
+  namespace: 'example:basic',
   blockTurnSize: 1,
   summarizer: summarize,
   extractor: extract,
@@ -78,6 +80,8 @@ if (assessment.verdict === 'sufficient') {
   await memory.recordMemoryUse({
     eventIds: results.map(({ event }) => event.id),
     elementIds: [...new Set(elementFacts.map(({ elementId }) => elementId))],
-  });
+  }, { receiptId: 'example:answer:1' });
   console.log(elementFacts[0]?.fact.value ?? results[0]?.event.summary);
 }
+
+await memory.close();

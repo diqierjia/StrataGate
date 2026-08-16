@@ -14,6 +14,8 @@ A layered memory and evidence retrieval system for long-running AI agents.
 
 [中文说明](README.zh-CN.md) · [Architecture](docs/ARCHITECTURE.md) · [Full evaluation](docs/EVALUATION.md)
 
+**DeepSeek Harness integration:** the native bundle in [`integrations/deepseek-harness`](integrations/deepseek-harness) turns completed DSH sessions into StrataGate memory and exposes evidence-gated Event, Element, Block, and raw-source tools. It is designed for one-click installation through a DSH plugin registry package.
+
 **LoCoMo `conv-26`: StrataGate averaged 80.46% accuracy across 10 independent Judge runs, versus 63.22% for Mem0 base (+17.24 percentage points)**
 
 **Majority-correct: 121 / 152 vs 96 / 152 (+25 questions)**

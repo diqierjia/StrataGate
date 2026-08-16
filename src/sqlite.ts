@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import {
   STRATAGATE_STORAGE_SCHEMA_VERSION,
   StorageConflictError,
@@ -6,6 +6,7 @@ import {
   cloneSnapshot,
   type ElementProjectionJob,
   type ExtractionJob,
+  type IngestionReceipt,
   type LoadedStrataGateState,
   type StorageAdapter,
   type StrataGateSnapshot,
@@ -113,6 +114,11 @@ interface UsageReceiptRow {
   receipt_id: string;
   event_ids_json: string;
   element_ids_json: string;
+  created_at: string;
+}
+
+interface IngestionReceiptRow {
+  receipt_id: string;
   created_at: string;
 }
 
@@ -353,6 +359,14 @@ CREATE TABLE IF NOT EXISTS usage_receipts (
   PRIMARY KEY (namespace, receipt_id),
   FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS ingestion_receipts (
+  namespace TEXT NOT NULL,
+  receipt_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (namespace, receipt_id),
+  FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
+) STRICT;
 `;
 
 function parseJson<T>(value: string, label: string): T {
@@ -370,19 +384,19 @@ function nonEmptyNamespace(namespace: string): string {
 }
 
 export class SqliteStorage implements StorageAdapter {
-  private readonly database: Database.Database;
+  private readonly database: DatabaseSync;
   private closed = false;
 
   constructor(options: SqliteStorageOptions) {
     if (!options.filename.trim()) throw new TypeError('SQLite filename must not be empty');
-    this.database = new Database(options.filename, {
-      readonly: options.readonly ?? false,
+    this.database = new DatabaseSync(options.filename, {
+      readOnly: options.readonly ?? false,
       timeout: Math.max(0, Math.floor(options.timeoutMs ?? 5_000)),
     });
     try {
-      this.database.pragma('foreign_keys = ON');
+      this.database.exec('PRAGMA foreign_keys = ON');
       if (!(options.readonly ?? false)) {
-        this.database.pragma('journal_mode = WAL');
+        this.database.exec('PRAGMA journal_mode = WAL');
         this.migrate();
       } else {
         this.assertSchemaVersion();
@@ -409,7 +423,7 @@ export class SqliteStorage implements StorageAdapter {
     const messageRows = this.database.prepare(`
       SELECT id, block_id, position, role, content, created_at, tool_calls_json
       FROM messages WHERE namespace = ? ORDER BY block_id, position
-    `).all(key) as MessageRow[];
+    `).all(key) as unknown as MessageRow[];
     const openTail: RawMessage[] = [];
     const messagesByBlock = new Map<string, RawMessage[]>();
     for (const row of messageRows) {
@@ -430,7 +444,7 @@ export class SqliteStorage implements StorageAdapter {
 
     const blockRows = this.database.prepare(`
       SELECT * FROM blocks WHERE namespace = ? ORDER BY sequence
-    `).all(key) as BlockRow[];
+    `).all(key) as unknown as BlockRow[];
     const blocks: MemoryBlock[] = blockRows.map((row) => ({
       id: row.id,
       sequence: row.sequence,
@@ -454,7 +468,7 @@ export class SqliteStorage implements StorageAdapter {
     const sourceRows = this.database.prepare(`
       SELECT event_id, message_id, position FROM event_sources
       WHERE namespace = ? ORDER BY event_id, position
-    `).all(key) as EventSourceRow[];
+    `).all(key) as unknown as EventSourceRow[];
     const sourcesByEvent = new Map<string, string[]>();
     for (const row of sourceRows) {
       const ids = sourcesByEvent.get(row.event_id) ?? [];
@@ -464,7 +478,7 @@ export class SqliteStorage implements StorageAdapter {
 
     const eventRows = this.database.prepare(`
       SELECT * FROM events WHERE namespace = ? ORDER BY position
-    `).all(key) as EventRow[];
+    `).all(key) as unknown as EventRow[];
     const events: EventCard[] = eventRows.map((row) => ({
       id: row.id,
       title: row.title,
@@ -495,7 +509,7 @@ export class SqliteStorage implements StorageAdapter {
     const elementSourceRows = this.database.prepare(`
       SELECT element_id, event_id, position FROM element_sources
       WHERE namespace = ? ORDER BY element_id, position
-    `).all(key) as ElementSourceRow[];
+    `).all(key) as unknown as ElementSourceRow[];
     const sourcesByElement = new Map<string, string[]>();
     for (const row of elementSourceRows) {
       const ids = sourcesByElement.get(row.element_id) ?? [];
@@ -506,7 +520,7 @@ export class SqliteStorage implements StorageAdapter {
     const elementFactSourceRows = this.database.prepare(`
       SELECT fact_id, event_id, position FROM element_fact_sources
       WHERE namespace = ? ORDER BY fact_id, position
-    `).all(key) as ElementFactSourceRow[];
+    `).all(key) as unknown as ElementFactSourceRow[];
     const sourcesByFact = new Map<string, string[]>();
     for (const row of elementFactSourceRows) {
       const ids = sourcesByFact.get(row.fact_id) ?? [];
@@ -516,7 +530,7 @@ export class SqliteStorage implements StorageAdapter {
 
     const elementFactRows = this.database.prepare(`
       SELECT * FROM element_facts WHERE namespace = ? ORDER BY element_id, position
-    `).all(key) as ElementFactRow[];
+    `).all(key) as unknown as ElementFactRow[];
     const factsByElement = new Map<string, ElementFact[]>();
     for (const row of elementFactRows) {
       const facts = factsByElement.get(row.element_id) ?? [];
@@ -538,7 +552,7 @@ export class SqliteStorage implements StorageAdapter {
 
     const elementRows = this.database.prepare(`
       SELECT * FROM elements WHERE namespace = ? ORDER BY position
-    `).all(key) as ElementRow[];
+    `).all(key) as unknown as ElementRow[];
     const messagesByEvent = new Map(events.map((event) => [event.id, event.sourceMessageIds]));
     const elements: ElementCard[] = elementRows.map((row) => {
       const sourceEventIds = sourcesByElement.get(row.id) ?? [];
@@ -567,7 +581,7 @@ export class SqliteStorage implements StorageAdapter {
     const extractionJobs = (this.database.prepare(`
       SELECT block_id, status, attempts, last_error, updated_at
       FROM extraction_jobs WHERE namespace = ? ORDER BY block_id
-    `).all(key) as ExtractionJobRow[]).map<ExtractionJob>((row) => ({
+    `).all(key) as unknown as ExtractionJobRow[]).map<ExtractionJob>((row) => ({
       blockId: row.block_id,
       status: row.status,
       attempts: row.attempts,
@@ -578,7 +592,7 @@ export class SqliteStorage implements StorageAdapter {
     const elementProjectionJobs = (this.database.prepare(`
       SELECT id, source_event_ids_json, status, attempts, element_ids_json, reason, last_error, created_at, updated_at
       FROM element_projection_jobs WHERE namespace = ? ORDER BY created_at, id
-    `).all(key) as ElementProjectionJobRow[]).map<ElementProjectionJob>((row) => ({
+    `).all(key) as unknown as ElementProjectionJobRow[]).map<ElementProjectionJob>((row) => ({
       id: row.id,
       sourceEventIds: parseJson<string[]>(row.source_event_ids_json, 'element_projection_jobs.source_event_ids_json'),
       status: row.status,
@@ -593,10 +607,18 @@ export class SqliteStorage implements StorageAdapter {
     const usageReceipts = (this.database.prepare(`
       SELECT receipt_id, event_ids_json, element_ids_json, created_at
       FROM usage_receipts WHERE namespace = ? ORDER BY created_at, receipt_id
-    `).all(key) as UsageReceiptRow[]).map<UsageReceipt>((row) => ({
+    `).all(key) as unknown as UsageReceiptRow[]).map<UsageReceipt>((row) => ({
       id: row.receipt_id,
       eventIds: parseJson<string[]>(row.event_ids_json, 'usage_receipts.event_ids_json'),
       elementIds: parseJson<string[]>(row.element_ids_json, 'usage_receipts.element_ids_json'),
+      createdAt: row.created_at,
+    }));
+
+    const ingestionReceipts = (this.database.prepare(`
+      SELECT receipt_id, created_at
+      FROM ingestion_receipts WHERE namespace = ? ORDER BY created_at, receipt_id
+    `).all(key) as unknown as IngestionReceiptRow[]).map<IngestionReceipt>((row) => ({
+      id: row.receipt_id,
       createdAt: row.created_at,
     }));
 
@@ -611,6 +633,7 @@ export class SqliteStorage implements StorageAdapter {
       extractionJobs,
       elementProjectionJobs,
       usageReceipts,
+      ingestionReceipts,
     };
     assertValidSnapshot(snapshot);
     return { snapshot: cloneSnapshot(snapshot), revision: space.revision };
@@ -623,8 +646,7 @@ export class SqliteStorage implements StorageAdapter {
       throw new TypeError('expectedRevision must be a non-negative integer');
     }
     const key = nonEmptyNamespace(namespace);
-    const persist = this.database.transaction(() => this.persistSnapshot(key, snapshot, expectedRevision));
-    return persist.immediate();
+    return this.immediateTransaction(() => this.persistSnapshot(key, snapshot, expectedRevision));
   }
 
   async close(): Promise<void> {
@@ -957,40 +979,70 @@ export class SqliteStorage implements StorageAdapter {
       );
     }
 
+    const insertIngestionReceipt = this.database.prepare(`
+      INSERT INTO ingestion_receipts (namespace, receipt_id, created_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT (namespace, receipt_id) DO NOTHING
+    `);
+    for (const receipt of snapshot.ingestionReceipts) {
+      insertIngestionReceipt.run(namespace, receipt.id, receipt.createdAt);
+    }
+
     return nextRevision;
   }
 
   private migrate(): void {
-    const version = this.database.pragma('user_version', { simple: true }) as number;
+    const version = this.userVersion();
     if (version > STRATAGATE_STORAGE_SCHEMA_VERSION) {
       throw new Error(`SQLite schema ${version} is newer than supported schema ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
     }
     if (version === 0) {
-      const migrate = this.database.transaction(() => {
+      this.immediateTransaction(() => {
         this.database.exec(SCHEMA);
-        this.database.pragma(`user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
+        this.database.exec(`PRAGMA user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
       });
-      migrate.immediate();
-    } else if (version === 1) {
-      const migrate = this.database.transaction(() => {
-        const receiptColumns = this.database.pragma('table_info(usage_receipts)') as Array<{ name: string }>;
-        if (!receiptColumns.some(({ name }) => name === 'element_ids_json')) {
-          this.database.exec("ALTER TABLE usage_receipts ADD COLUMN element_ids_json TEXT NOT NULL DEFAULT '[]'");
+    } else if (version === 1 || version === 2) {
+      this.immediateTransaction(() => {
+        if (version === 1) {
+          const receiptColumns = this.database.prepare("PRAGMA table_info('usage_receipts')").all() as unknown as Array<{ name: string }>;
+          if (!receiptColumns.some(({ name }) => name === 'element_ids_json')) {
+            this.database.exec("ALTER TABLE usage_receipts ADD COLUMN element_ids_json TEXT NOT NULL DEFAULT '[]'");
+          }
         }
         this.database.exec(SCHEMA);
-        this.database.prepare('UPDATE memory_spaces SET schema_version = ? WHERE schema_version = 1')
-          .run(STRATAGATE_STORAGE_SCHEMA_VERSION);
-        this.database.pragma(`user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
+        this.database.prepare('UPDATE memory_spaces SET schema_version = ? WHERE schema_version < ?')
+          .run(STRATAGATE_STORAGE_SCHEMA_VERSION, STRATAGATE_STORAGE_SCHEMA_VERSION);
+        this.database.exec(`PRAGMA user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
       });
-      migrate.immediate();
     }
     this.assertSchemaVersion();
   }
 
   private assertSchemaVersion(): void {
-    const version = this.database.pragma('user_version', { simple: true }) as number;
+    const version = this.userVersion();
     if (version !== STRATAGATE_STORAGE_SCHEMA_VERSION) {
       throw new Error(`Unsupported SQLite schema version: ${version}`);
+    }
+  }
+
+  private userVersion(): number {
+    const row = this.database.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined;
+    return row?.user_version ?? 0;
+  }
+
+  private immediateTransaction<T>(operation: () => T): T {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const result = operation();
+      this.database.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve the operation error if SQLite already rolled the transaction back.
+      }
+      throw error;
     }
   }
 

@@ -7,6 +7,7 @@ import {
 } from './blocks.js';
 import { applyElementChanges, elementViewAt } from './elements.js';
 import { normalizeRetrievalAssessment, type RetrievalAssessment, type RetrievalAssessmentInput } from './retrieval.js';
+import { SqliteStorage } from './sqlite.js';
 import {
   bm25Rank,
   fuzzySearchMatch,
@@ -21,6 +22,7 @@ import {
   normalizeSnapshot,
   type ElementProjectionJob,
   type ExtractionJob,
+  type IngestionReceipt,
   type StorageAdapter,
   type StrataGateSnapshot,
   type UsageReceipt,
@@ -62,12 +64,19 @@ export interface PersistentStrataGateOptions extends StrataGateOptions {
   namespace: string;
 }
 
+export interface SqliteStrataGateOptions extends StrataGateOptions {
+  database: string;
+  namespace: string;
+  timeoutMs?: number;
+}
+
 export interface TurnInput {
   user: string;
   assistant: string;
   createdAt?: string;
   userToolCalls?: ToolTrace[];
   assistantToolCalls?: ToolTrace[];
+  receiptId?: string;
 }
 
 export interface BlockContextEntry {
@@ -136,6 +145,8 @@ function errorMessage(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 1_000);
 }
 
+const STRATAGATE_CONSTRUCTOR_TOKEN = Symbol('StrataGate constructor');
+
 export class StrataGate {
   readonly blockTurnSize: number;
 
@@ -152,13 +163,17 @@ export class StrataGate {
   private readonly extractionJobs = new Map<string, ExtractionJob>();
   private readonly elementProjectionJobs = new Map<string, ElementProjectionJob>();
   private readonly usageReceipts = new Map<string, UsageReceipt>();
+  private readonly ingestionReceipts = new Map<string, IngestionReceipt>();
   private currentTurn = 0;
   private storage: StorageAdapter | undefined;
   private namespace: string | undefined;
   private revision = 0;
   private mutationQueue: Promise<void> = Promise.resolve();
 
-  constructor(options: StrataGateOptions = {}) {
+  private constructor(options: StrataGateOptions, token: symbol) {
+    if (token !== STRATAGATE_CONSTRUCTOR_TOKEN) {
+      throw new TypeError('Use StrataGate.open() for SQLite or StrataGate.inMemory() for explicit ephemeral storage');
+    }
     this.blockTurnSize = Math.max(1, Math.floor(options.blockTurnSize ?? DEFAULT_BLOCK_TURN_SIZE));
     this.summarizer = options.summarizer;
     this.extractor = options.extractor;
@@ -168,7 +183,36 @@ export class StrataGate {
     this.elementIdFactory = options.elementIdFactory ?? defaultElementIdFactory;
   }
 
-  static async open(options: PersistentStrataGateOptions): Promise<StrataGate> {
+  static inMemory(options: StrataGateOptions = {}): StrataGate {
+    return new StrataGate(options, STRATAGATE_CONSTRUCTOR_TOKEN);
+  }
+
+  static async open(options: SqliteStrataGateOptions): Promise<StrataGate> {
+    const database = options.database.trim();
+    if (!database) throw new TypeError('SQLite database path must not be empty');
+    const storage = new SqliteStorage({
+      filename: database,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    });
+    try {
+      return await StrataGate.openWithStorage({
+        storage,
+        namespace: options.namespace,
+        ...(options.blockTurnSize !== undefined ? { blockTurnSize: options.blockTurnSize } : {}),
+        ...(options.summarizer ? { summarizer: options.summarizer } : {}),
+        ...(options.extractor ? { extractor: options.extractor } : {}),
+        ...(options.elementProjector ? { elementProjector: options.elementProjector } : {}),
+        ...(options.now ? { now: options.now } : {}),
+        ...(options.idFactory ? { idFactory: options.idFactory } : {}),
+        ...(options.elementIdFactory ? { elementIdFactory: options.elementIdFactory } : {}),
+      });
+    } catch (error) {
+      await storage.close();
+      throw error;
+    }
+  }
+
+  static async openWithStorage(options: PersistentStrataGateOptions): Promise<StrataGate> {
     const namespace = options.namespace.trim();
     if (!namespace) throw new TypeError('Storage namespace must not be empty');
     const loaded = await options.storage.load(namespace);
@@ -188,7 +232,7 @@ export class StrataGate {
     if (options.now) memoryOptions.now = options.now;
     if (options.idFactory) memoryOptions.idFactory = options.idFactory;
     if (options.elementIdFactory) memoryOptions.elementIdFactory = options.elementIdFactory;
-    const memory = new StrataGate(memoryOptions);
+    const memory = new StrataGate(memoryOptions, STRATAGATE_CONSTRUCTOR_TOKEN);
     memory.storage = options.storage;
     memory.namespace = namespace;
     if (loaded && loadedSnapshot) {
@@ -273,10 +317,19 @@ export class StrataGate {
       extractionJobs: [...this.extractionJobs.values()],
       elementProjectionJobs: [...this.elementProjectionJobs.values()],
       usageReceipts: [...this.usageReceipts.values()],
+      ingestionReceipts: [...this.ingestionReceipts.values()],
     });
   }
 
+  hasIngestionReceipt(receiptId: string): boolean {
+    return this.ingestionReceipts.has(receiptId.trim());
+  }
+
   async appendTurn(input: TurnInput): Promise<AppendTurnResult> {
+    const receiptId = input.receiptId?.trim();
+    if (input.receiptId !== undefined && !receiptId) {
+      throw new TypeError('Turn receiptId must not be empty');
+    }
     const createdAt = input.createdAt ?? this.now().toISOString();
     const userMessage: RawMessage = {
       id: this.idFactory('msg'),
@@ -292,10 +345,14 @@ export class StrataGate {
       createdAt,
       ...(input.assistantToolCalls ? { toolCalls: input.assistantToolCalls } : {}),
     };
-    await this.commitMutation(() => {
+    const appended = await this.commitMutation(() => {
+      if (receiptId && this.ingestionReceipts.has(receiptId)) return false;
       this.currentTurn += 1;
       this.openTail.push(userMessage, assistantMessage);
+      if (receiptId) this.ingestionReceipts.set(receiptId, { id: receiptId, createdAt });
+      return true;
     });
+    if (!appended) return { sealedBlock: null, extractedEvents: [], projectedElements: [] };
 
     if (this.openTail.filter((message) => message.role === 'user').length < this.blockTurnSize) {
       const projectedElements = await this.projectEligibleElements() ?? [];
@@ -929,6 +986,8 @@ export class StrataGate {
     for (const job of copy.elementProjectionJobs) this.elementProjectionJobs.set(job.id, job);
     this.usageReceipts.clear();
     for (const receipt of copy.usageReceipts) this.usageReceipts.set(receipt.id, receipt);
+    this.ingestionReceipts.clear();
+    for (const receipt of copy.ingestionReceipts) this.ingestionReceipts.set(receipt.id, receipt);
     this.validateReferences();
   }
 

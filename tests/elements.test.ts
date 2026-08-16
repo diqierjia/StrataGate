@@ -56,7 +56,7 @@ const projector: ElementProjector = async ({ events }) => ({
 
 describe('element projection and retrieval', () => {
   it('projects elements independently, preserves event history, and exposes time views', async () => {
-    const memory = new StrataGate({
+    const memory = StrataGate.inMemory({
       blockTurnSize: 1,
       summarizer,
       extractor,
@@ -93,7 +93,7 @@ describe('element projection and retrieval', () => {
   });
 
   it('retrieves fact-level element evidence with BM25 plus structured rankings', async () => {
-    const memory = new StrataGate({
+    const memory = StrataGate.inMemory({
       blockTurnSize: 1,
       summarizer,
       extractor,
@@ -115,7 +115,7 @@ describe('element projection and retrieval', () => {
   });
 
   it('retries only a failed projection and rejects facts without batch provenance', async () => {
-    const memory = new StrataGate({
+    const memory = StrataGate.inMemory({
       blockTurnSize: 1,
       summarizer,
       idFactory: ids(),

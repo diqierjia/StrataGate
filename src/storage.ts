@@ -1,6 +1,6 @@
 import type { ElementCard, EventCard, MemoryBlock, RawMessage } from './types.js';
 
-export const STRATAGATE_STORAGE_SCHEMA_VERSION = 2;
+export const STRATAGATE_STORAGE_SCHEMA_VERSION = 3;
 
 export type ExtractionJobStatus = 'running' | 'succeeded' | 'skipped' | 'failed';
 
@@ -33,6 +33,11 @@ export interface UsageReceipt {
   createdAt: string;
 }
 
+export interface IngestionReceipt {
+  id: string;
+  createdAt: string;
+}
+
 export interface StrataGateSnapshot {
   schemaVersion: typeof STRATAGATE_STORAGE_SCHEMA_VERSION;
   currentTurn: number;
@@ -44,6 +49,7 @@ export interface StrataGateSnapshot {
   extractionJobs: ExtractionJob[];
   elementProjectionJobs: ElementProjectionJob[];
   usageReceipts: UsageReceipt[];
+  ingestionReceipts: IngestionReceipt[];
 }
 
 export interface LoadedStrataGateState {
@@ -72,9 +78,13 @@ export function cloneSnapshot(snapshot: StrataGateSnapshot): StrataGateSnapshot 
   return structuredClone(snapshot);
 }
 
-interface LegacySnapshotV1 extends Omit<StrataGateSnapshot, 'schemaVersion' | 'elements' | 'elementProjectionJobs' | 'usageReceipts'> {
+interface LegacySnapshotV1 extends Omit<StrataGateSnapshot, 'schemaVersion' | 'elements' | 'elementProjectionJobs' | 'usageReceipts' | 'ingestionReceipts'> {
   schemaVersion: 1;
   usageReceipts: Array<Omit<UsageReceipt, 'elementIds'>>;
+}
+
+interface LegacySnapshotV2 extends Omit<StrataGateSnapshot, 'schemaVersion' | 'ingestionReceipts'> {
+  schemaVersion: 2;
 }
 
 export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
@@ -91,6 +101,13 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
       usageReceipts: Array.isArray(legacy.usageReceipts)
         ? legacy.usageReceipts.map((receipt) => ({ ...receipt, elementIds: [] }))
         : [],
+      ingestionReceipts: [],
+    };
+  } else if (schemaVersion === 2) {
+    snapshot = {
+      ...structuredClone(value as LegacySnapshotV2),
+      schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
+      ingestionReceipts: [],
     };
   } else if (schemaVersion === STRATAGATE_STORAGE_SCHEMA_VERSION) {
     snapshot = structuredClone(value) as StrataGateSnapshot;
@@ -103,7 +120,7 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
   if (!Number.isSafeInteger(snapshot.blockTurnSize) || (snapshot.blockTurnSize ?? 0) < 1) {
     throw new TypeError('Invalid StrataGate snapshot: blockTurnSize must be a positive integer');
   }
-  for (const key of ['openTail', 'blocks', 'events', 'elements', 'extractionJobs', 'elementProjectionJobs', 'usageReceipts'] as const) {
+  for (const key of ['openTail', 'blocks', 'events', 'elements', 'extractionJobs', 'elementProjectionJobs', 'usageReceipts', 'ingestionReceipts'] as const) {
     if (!Array.isArray(snapshot[key])) throw new TypeError(`Invalid StrataGate snapshot: ${key} must be an array`);
   }
   return snapshot;

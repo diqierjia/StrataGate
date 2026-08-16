@@ -30,8 +30,13 @@ const extractor: EventExtractor = async ({ target }) => ({
 });
 
 describe('StrataGate lifecycle', () => {
+  it('rejects implicit construction so ephemeral storage stays explicit', () => {
+    const UnsafeConstructor = StrataGate as unknown as new () => StrataGate;
+    expect(() => new UnsafeConstructor()).toThrow('Use StrataGate.open() for SQLite');
+  });
+
   it('seals blocks, delays extraction, searches, and records adoption separately', async () => {
-    const memory = new StrataGate({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
+    const memory = StrataGate.inMemory({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
     const first = await memory.appendTurn({ user: 'Please keep answers concise.', assistant: 'Understood.' });
     expect(first.sealedBlock).not.toBeNull();
     expect(first.extractedEvents).toHaveLength(0);
@@ -53,7 +58,7 @@ describe('StrataGate lifecycle', () => {
   });
 
   it('keeps forgotten events out of search without deleting their provenance', async () => {
-    const memory = new StrataGate({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
+    const memory = StrataGate.inMemory({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
     await memory.appendTurn({ user: 'Please keep answers concise.', assistant: 'Understood.' });
     await memory.appendTurn({ user: 'What did I ask?', assistant: 'Let me check.' });
     const event = memory.listEvents()[0];

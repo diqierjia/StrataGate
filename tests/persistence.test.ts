@@ -52,17 +52,41 @@ const extractor: EventExtractor = async ({ target }) => ({
 });
 
 describe('SQLite persistence', () => {
-  it('creates schema version two and rejects a newer database schema', async () => {
+  it('uses SQLite for the normal open entrypoint and keeps memory mode explicit', async () => {
+    const filename = await databasePath();
+    const persistent = await StrataGate.open({
+      database: filename,
+      namespace: 'default:sqlite',
+      now: fixedNow,
+      idFactory: ids(),
+    });
+    expect(persistent.storageRevision).toBe(1);
+    await persistent.appendTurn({ user: 'stored', assistant: 'durably' });
+    expect(persistent.storageRevision).toBe(2);
+    await persistent.close();
+
+    const database = new Database(filename, { readonly: true });
+    expect(database.prepare('SELECT current_turn FROM memory_spaces WHERE namespace = ?')
+      .pluck().get('default:sqlite')).toBe(1);
+    database.close();
+
+    const ephemeral = StrataGate.inMemory({ now: fixedNow, idFactory: ids() });
+    expect(ephemeral.storageRevision).toBe(0);
+    await ephemeral.appendTurn({ user: 'temporary', assistant: 'only' });
+    expect(ephemeral.storageRevision).toBe(0);
+  });
+
+  it('creates schema version three and rejects a newer database schema', async () => {
     const initializedFilename = await databasePath();
     const initialized = new SqliteStorage({ filename: initializedFilename });
     await initialized.close();
     const initializedDatabase = new Database(initializedFilename, { readonly: true });
-    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(2);
+    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(3);
     initializedDatabase.close();
 
     const newerFilename = await databasePath();
     const newerDatabase = new Database(newerFilename);
-    newerDatabase.pragma('user_version = 3');
+    newerDatabase.pragma('user_version = 4');
     newerDatabase.close();
     expect(() => new SqliteStorage({ filename: newerFilename })).toThrow('newer than supported');
   });
@@ -71,7 +95,7 @@ describe('SQLite persistence', () => {
     const filename = await databasePath();
     const idFactory = ids();
     const first = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'user:alice',
       blockTurnSize: 2,
       summarizer,
@@ -83,7 +107,7 @@ describe('SQLite persistence', () => {
     await first.close();
 
     const second = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'user:alice',
       summarizer,
       idFactory,
@@ -99,7 +123,7 @@ describe('SQLite persistence', () => {
     await second.close();
 
     const restored = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'user:alice',
       summarizer,
       idFactory,
@@ -115,7 +139,7 @@ describe('SQLite persistence', () => {
       throw new Error('summary unavailable');
     };
     const first = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'session:summary-retry',
       blockTurnSize: 1,
       summarizer: failingSummary,
@@ -130,7 +154,7 @@ describe('SQLite persistence', () => {
     await first.close();
 
     const restored = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'session:summary-retry',
       summarizer,
       now: fixedNow,
@@ -152,7 +176,7 @@ describe('SQLite persistence', () => {
     };
     const idFactory = ids();
     const first = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'session:extract-retry',
       blockTurnSize: 1,
       summarizer,
@@ -174,7 +198,7 @@ describe('SQLite persistence', () => {
     await first.close();
 
     const restored = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'session:extract-retry',
       summarizer,
       extractor,
@@ -196,7 +220,7 @@ describe('SQLite persistence', () => {
     const filename = await databasePath();
     const idFactory = ids();
     const first = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'user:receipts',
       blockTurnSize: 1,
       summarizer,
@@ -215,7 +239,7 @@ describe('SQLite persistence', () => {
     await first.close();
 
     const restored = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'user:receipts',
       summarizer,
       extractor,
@@ -236,14 +260,14 @@ describe('SQLite persistence', () => {
   it('rejects a stale writer and rolls back its in-memory mutation', async () => {
     const filename = await databasePath();
     const first = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'project:shared',
       blockTurnSize: 12,
       now: fixedNow,
       idFactory: ids(),
     });
     const stale = await StrataGate.open({
-      storage: new SqliteStorage({ filename }),
+      database: filename,
       namespace: 'project:shared',
       now: fixedNow,
       idFactory: ids(),
@@ -287,15 +311,22 @@ describe('SQLite persistence', () => {
     const storage = new SqliteStorage({ filename });
     const loaded = await storage.load('legacy:user');
     expect(loaded?.revision).toBe(7);
-    expect(loaded?.snapshot).toMatchObject({ schemaVersion: 2, elements: [], elementProjectionJobs: [] });
+    expect(loaded?.snapshot).toMatchObject({
+      schemaVersion: 3,
+      elements: [],
+      elementProjectionJobs: [],
+      ingestionReceipts: [],
+    });
     await storage.close();
 
     const migrated = new Database(filename, { readonly: true });
-    expect(migrated.pragma('user_version', { simple: true })).toBe(2);
+    expect(migrated.pragma('user_version', { simple: true })).toBe(3);
     expect((migrated.pragma('table_info(usage_receipts)') as Array<{ name: string }>)
       .map(({ name }) => name)).toContain('element_ids_json');
     expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'elements'")
       .pluck().get()).toBe('elements');
+    expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ingestion_receipts'")
+      .pluck().get()).toBe('ingestion_receipts');
     migrated.close();
   });
 
@@ -306,7 +337,7 @@ describe('SQLite persistence', () => {
       let value = 0;
       return (prefix: 'elem' | 'fact' | 'proj') => `${prefix}_${++value}`;
     })();
-    const first = await StrataGate.open({
+    const first = await StrataGate.openWithStorage({
       storage,
       namespace: 'project:elements',
       blockTurnSize: 1,
@@ -338,7 +369,7 @@ describe('SQLite persistence', () => {
     await first.close();
 
     const restoredStorage = new SqliteStorage({ filename });
-    const restored = await StrataGate.open({ storage: restoredStorage, namespace: 'project:elements' });
+    const restored = await StrataGate.openWithStorage({ storage: restoredStorage, namespace: 'project:elements' });
     expect(restored.listElements()[0]).toMatchObject({
       name: 'StrataGate',
       currentState: 'storage: SQLite',
