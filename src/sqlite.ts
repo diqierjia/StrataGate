@@ -10,6 +10,7 @@ import {
   type LoadedStrataGateState,
   type StorageAdapter,
   type StrataGateSnapshot,
+  type UsageAudit,
   type UsageReceipt,
 } from './storage.js';
 import type {
@@ -114,6 +115,7 @@ interface UsageReceiptRow {
   receipt_id: string;
   event_ids_json: string;
   element_ids_json: string;
+  audit_json: string;
   created_at: string;
 }
 
@@ -355,6 +357,7 @@ CREATE TABLE IF NOT EXISTS usage_receipts (
   receipt_id TEXT NOT NULL,
   event_ids_json TEXT NOT NULL,
   element_ids_json TEXT NOT NULL,
+  audit_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   PRIMARY KEY (namespace, receipt_id),
   FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
@@ -605,14 +608,18 @@ export class SqliteStorage implements StorageAdapter {
     }));
 
     const usageReceipts = (this.database.prepare(`
-      SELECT receipt_id, event_ids_json, element_ids_json, created_at
+      SELECT receipt_id, event_ids_json, element_ids_json, audit_json, created_at
       FROM usage_receipts WHERE namespace = ? ORDER BY created_at, receipt_id
-    `).all(key) as unknown as UsageReceiptRow[]).map<UsageReceipt>((row) => ({
-      id: row.receipt_id,
-      eventIds: parseJson<string[]>(row.event_ids_json, 'usage_receipts.event_ids_json'),
-      elementIds: parseJson<string[]>(row.element_ids_json, 'usage_receipts.element_ids_json'),
-      createdAt: row.created_at,
-    }));
+    `).all(key) as unknown as UsageReceiptRow[]).map<UsageReceipt>((row) => {
+      const audit = parseJson<UsageAudit>(row.audit_json, 'usage_receipts.audit_json');
+      return {
+        id: row.receipt_id,
+        eventIds: parseJson<string[]>(row.event_ids_json, 'usage_receipts.event_ids_json'),
+        elementIds: parseJson<string[]>(row.element_ids_json, 'usage_receipts.element_ids_json'),
+        ...(Object.keys(audit).length === 0 ? {} : { audit }),
+        createdAt: row.created_at,
+      };
+    });
 
     const ingestionReceipts = (this.database.prepare(`
       SELECT receipt_id, created_at
@@ -965,8 +972,8 @@ export class SqliteStorage implements StorageAdapter {
     }
 
     const insertReceipt = this.database.prepare(`
-      INSERT INTO usage_receipts (namespace, receipt_id, event_ids_json, element_ids_json, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO usage_receipts (namespace, receipt_id, event_ids_json, element_ids_json, audit_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT (namespace, receipt_id) DO NOTHING
     `);
     for (const receipt of snapshot.usageReceipts) {
@@ -975,6 +982,7 @@ export class SqliteStorage implements StorageAdapter {
         receipt.id,
         JSON.stringify(receipt.eventIds),
         JSON.stringify(receipt.elementIds),
+        JSON.stringify(receipt.audit ?? {}),
         receipt.createdAt,
       );
     }
@@ -1001,13 +1009,17 @@ export class SqliteStorage implements StorageAdapter {
         this.database.exec(SCHEMA);
         this.database.exec(`PRAGMA user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
       });
-    } else if (version === 1 || version === 2) {
+    } else if (version === 1 || version === 2 || version === 3) {
       this.immediateTransaction(() => {
         if (version === 1) {
           const receiptColumns = this.database.prepare("PRAGMA table_info('usage_receipts')").all() as unknown as Array<{ name: string }>;
           if (!receiptColumns.some(({ name }) => name === 'element_ids_json')) {
             this.database.exec("ALTER TABLE usage_receipts ADD COLUMN element_ids_json TEXT NOT NULL DEFAULT '[]'");
           }
+        }
+        const receiptColumns = this.database.prepare("PRAGMA table_info('usage_receipts')").all() as unknown as Array<{ name: string }>;
+        if (!receiptColumns.some(({ name }) => name === 'audit_json')) {
+          this.database.exec("ALTER TABLE usage_receipts ADD COLUMN audit_json TEXT NOT NULL DEFAULT '{}'");
         }
         this.database.exec(SCHEMA);
         this.database.prepare('UPDATE memory_spaces SET schema_version = ? WHERE schema_version < ?')
@@ -1048,5 +1060,11 @@ export class SqliteStorage implements StorageAdapter {
 
   private assertOpen(): void {
     if (this.closed) throw new Error('SQLite storage is closed');
+  }
+
+  listNamespaces(): string[] {
+    this.assertOpen();
+    return (this.database.prepare('SELECT namespace FROM memory_spaces ORDER BY namespace').all() as Array<{ namespace: string }>)
+      .map(({ namespace }) => namespace);
   }
 }

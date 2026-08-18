@@ -5,6 +5,7 @@ import { Config, resolveConfig, type Config as StrataGateConfig } from './config
 import { DshModelBridge } from './llm.js'
 import { StrataGateRuntime } from './runtime.js'
 import { registerMemoryTools } from './tools.js'
+import { registerAdminRoutes } from './web.js'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session'
@@ -39,8 +40,12 @@ export async function apply(ctx: Context, config: StrataGateConfig): Promise<() 
 
   ctx.systemPrompt.section({ name: 'tool:stratagate-memory', order: 113, text: MEMORY_PROTOCOL })
   registerMemoryTools(ctx, runtime)
+  const disposeAdminRoutes = registerAdminRoutes(ctx, runtime)
   ctx.on('session/event', (session, event) => runtime.acceptEvent(session, event))
 
   ctx.logger.info(`stratagate-memory ready (${resolved.namespaceMode} namespaces, ${resolved.database})`)
-  return async () => runtime.close()
+  return async () => {
+    disposeAdminRoutes?.()
+    await runtime.close()
+  }
 }

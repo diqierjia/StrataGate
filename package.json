@@ -30,6 +30,7 @@
     "check:dsh": "npm run check --workspace stratagate-dsh",
     "test": "vitest run",
     "test:dsh": "npm run test --workspace stratagate-dsh",
+    "verify:dsh": "npm run verify:package --workspace stratagate-dsh",
     "test:watch": "vitest",
     "prepare": "npm run build"
   },

@@ -70,4 +70,73 @@ describe('DSH runtime ingestion', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('persists the retrieval assessment as an answer-to-source usage audit', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-dsh-audit-'))
+    const database = join(directory, 'memory.db')
+    const runtime = new StrataGateRuntime({
+      database,
+      namespaceMode: 'project',
+      namespacePrefix: 'dsh',
+      globalNamespace: 'global',
+      blockTurnSize: 1,
+      ingestSubagents: false,
+      maxOutputTokens: 2048,
+    }, fakeModels)
+    const activeSession = {
+      ...session,
+      events: [{ type: 'turn/start', seq: 0, time: 1, data: { turn: 9 } }],
+    } as unknown as Session
+    const namespace = runtime.namespaceFor(activeSession)
+    try {
+      const seed = await StrataGate.open({
+        database,
+        namespace,
+        blockTurnSize: 1,
+        summarizer: async () => ({
+          l0Title: 'package manager', l0Tags: ['pnpm'], l1Summary: 'Use pnpm.', l2Keypoints: ['pnpm'], shouldExtract: true,
+        }),
+        extractor: async ({ target }) => ({
+          shouldExtract: true,
+          reason: 'durable project decision',
+          events: [{
+            title: 'Use pnpm',
+            summary: 'The project uses pnpm.',
+            sourceMessageIds: [target.l5Raw[0]?.id ?? 'missing'],
+            sourceBlockId: target.id,
+          }],
+        }),
+      })
+      await seed.appendTurn({ user: 'Use pnpm.', assistant: 'Okay.' })
+      await seed.appendTurn({ user: 'Continue.', assistant: 'Okay.' })
+      await seed.close()
+
+      const batch = await runtime.searchEvents(activeSession, 'pnpm') as { batchId: string; evidenceRefs: string[] }
+      expect(batch.evidenceRefs).toHaveLength(1)
+      await runtime.assess(activeSession, {
+        verdict: 'sufficient',
+        evidence_refs: batch.evidenceRefs,
+        fit: 'The event records the package-manager decision.',
+        missing: '',
+        next_strategy: 'answer',
+      })
+      await runtime.recordUse(activeSession, 'call-audit-1')
+
+      const audit = (await runtime.adminSnapshot(namespace))?.usageReceipts[0]
+      expect(audit).toMatchObject({
+        id: 'dsh:session-runtime:tool:call-audit-1',
+        audit: {
+          sessionId: 'session-runtime',
+          turn: 9,
+          batchId: batch.batchId,
+          evidenceRefs: batch.evidenceRefs,
+          verdict: 'sufficient',
+          nextStrategy: 'answer',
+        },
+      })
+    } finally {
+      await runtime.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })

@@ -52,6 +52,17 @@ memory_record_use
 
 The prompt protocol requires assessment after every retrieval. Search does not strengthen a memory. `memory_record_use` records only evidence from the last sufficient assessment and uses the DSH tool call id as an idempotency receipt.
 
+## Read-only Memory UI and usage audit
+
+Open DSH Settings and select **StrataGate Memory**. The page provides:
+
+- namespace health and memory counts;
+- searchable Events, Elements, and Blocks;
+- source-message expansion from every derived memory;
+- a Usage Audit chain from a recorded answer turn, through the Evidence Gate verdict and selected memories, back to source messages.
+
+The browser surface is intentionally read-only: its API accepts only `GET`, and the UI exposes no edit, delete, approve, or import operation. Common token and credential patterns are redacted in both message content and structured tool traces before they leave the local server. The SQLite database remains the source of truth.
+
 ## Configuration
 
 ```yaml
@@ -76,6 +87,12 @@ If `provider` and `model` are omitted, memory processing uses the session's late
 
 Memory is stored in the configured local SQLite file. Normal DSH model-provider calls are used only when StrataGate seals a block, extracts Events, or projects Elements. Raw source messages remain available at L5 for verification.
 
+## Compatibility and permissions
+
+Release gates exercise DSH `0.1.0-rc.6` and `0.1.0-rc.7` on Node `24`, plus the core package on Node `22.19` and `24`. The published peer range accepts compatible pre-`0.2.0` DSH releases starting at `rc.6`.
+
+The package declares local filesystem read/write and Harness tool registration. It does not request direct network, subprocess, shell, Python, or credential access. Model calls still flow through DSH's existing LLM service.
+
 If a memory-model call fails, the raw turn and the pending job remain durable. A later open resumes the job without appending the turn again. Retrieval waits for queued ingestion so a just-completed turn is not raced by a search.
 
 ## Development
@@ -87,5 +104,7 @@ npm install
 npm run check:dsh
 npm run test:dsh
 npm run build:dsh
-npm pack --workspace stratagate-dsh
+npm run verify:dsh
 ```
+
+`verify:dsh` inspects the tarball allowlist, rejects leaked source/runtime/secret files, installs the exact tarball in a clean temporary project, and imports the installed plugin.

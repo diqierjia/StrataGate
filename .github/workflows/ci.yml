@@ -9,15 +9,40 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.19.0, 24.x]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run check
       - run: npm test
       - run: npm run build
+
+  dsh-compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        dsh: [0.1.0-rc.6, 0.1.0-rc.7]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - name: Select DSH compatibility target
+        run: npm install --no-save --package-lock=false @deepseek-ai/dsh-agent-default-model@${{ matrix.dsh }} @deepseek-ai/dsh-llm@${{ matrix.dsh }} @deepseek-ai/dsh-session@${{ matrix.dsh }} @deepseek-ai/dsh-system-prompt@${{ matrix.dsh }} @deepseek-ai/dsh-tools@${{ matrix.dsh }}
+      - run: npm run check:dsh
+      - run: npm run test:dsh
+      - run: npm run build:dsh
+      - run: npm run verify:dsh

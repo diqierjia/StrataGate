@@ -25,6 +25,7 @@ import {
   type IngestionReceipt,
   type StorageAdapter,
   type StrataGateSnapshot,
+  type UsageAudit,
   type UsageReceipt,
 } from './storage.js';
 import type {
@@ -89,6 +90,7 @@ export interface BlockContextEntry {
 
 export interface RecordMemoryUseOptions {
   receiptId?: string;
+  audit?: UsageAudit;
 }
 
 export interface MemoryUseRefs {
@@ -303,6 +305,10 @@ export class StrataGate {
 
   listElementProjectionJobs(): readonly ElementProjectionJob[] {
     return [...this.elementProjectionJobs.values()];
+  }
+
+  listUsageReceipts(): readonly UsageReceipt[] {
+    return [...this.usageReceipts.values()];
   }
 
   exportSnapshot(): StrataGateSnapshot {
@@ -661,12 +667,14 @@ export class StrataGate {
       : refs as MemoryUseRefs;
     const requestedEventIds = [...new Set(normalizedRefs.eventIds ?? [])];
     const requestedElementIds = [...new Set(normalizedRefs.elementIds ?? [])];
+    const audit = options.audit === undefined ? undefined : structuredClone(options.audit);
     if (receiptId) {
       const existing = this.usageReceipts.get(receiptId);
       if (existing) {
         if (!sameIds(existing.eventIds, requestedEventIds)
-          || !sameIds(existing.elementIds, requestedElementIds)) {
-          throw new Error(`Usage receipt ${receiptId} was already recorded with different memory IDs`);
+          || !sameIds(existing.elementIds, requestedElementIds)
+          || JSON.stringify(existing.audit ?? null) !== JSON.stringify(audit ?? null)) {
+          throw new Error(`Usage receipt ${receiptId} was already recorded with different memory IDs or audit metadata`);
         }
         return;
       }
@@ -692,6 +700,7 @@ export class StrataGate {
         id: receiptId,
         eventIds: requestedEventIds,
         elementIds: requestedElementIds,
+        ...(audit === undefined ? {} : { audit }),
         createdAt: now,
       });
     });

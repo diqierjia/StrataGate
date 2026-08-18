@@ -1,0 +1,43 @@
+name: Release DeepSeek Harness plugin
+
+on:
+  push:
+    tags: [stratagate-dsh-v*]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Install npm with trusted-publishing support
+        run: npm install --global npm@^11.15.0
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Verify tag and package version match
+        shell: bash
+        run: |
+          expected="stratagate-dsh-v$(node -p 'require("./integrations/deepseek-harness/package.json").version')"
+          test "$GITHUB_REF_NAME" = "$expected" || { echo "Expected tag $expected, received $GITHUB_REF_NAME"; exit 1; }
+      - run: npm run check
+      - run: npm test
+      - run: npm run check:dsh
+      - run: npm run test:dsh
+      - run: npm run build:dsh
+      - run: npm run verify:dsh
+      - run: npm publish --workspace stratagate-dsh --provenance --access public
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="$(node -p 'require("./integrations/deepseek-harness/package.json").version')"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "StrataGate DSH $version"

@@ -76,17 +76,17 @@ describe('SQLite persistence', () => {
     expect(ephemeral.storageRevision).toBe(0);
   });
 
-  it('creates schema version three and rejects a newer database schema', async () => {
+  it('creates schema version four and rejects a newer database schema', async () => {
     const initializedFilename = await databasePath();
     const initialized = new SqliteStorage({ filename: initializedFilename });
     await initialized.close();
     const initializedDatabase = new Database(initializedFilename, { readonly: true });
-    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(3);
+    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(4);
     initializedDatabase.close();
 
     const newerFilename = await databasePath();
     const newerDatabase = new Database(newerFilename);
-    newerDatabase.pragma('user_version = 4');
+    newerDatabase.pragma('user_version = 5');
     newerDatabase.close();
     expect(() => new SqliteStorage({ filename: newerFilename })).toThrow('newer than supported');
   });
@@ -233,8 +233,18 @@ describe('SQLite persistence', () => {
     const event = first.listEvents()[0];
     expect(event).toBeDefined();
     if (!event) return;
-    await first.recordMemoryUse([event.id], { receiptId: 'answer:42' });
-    await first.recordMemoryUse([event.id], { receiptId: 'answer:42' });
+    const audit = {
+      sessionId: 'session-42',
+      turn: 7,
+      batchId: 'batch_1',
+      evidenceRefs: [`event:${event.id}`],
+      verdict: 'sufficient' as const,
+      fit: 'The event directly supports the answer.',
+      missing: '',
+      nextStrategy: 'answer',
+    };
+    await first.recordMemoryUse([event.id], { receiptId: 'answer:42', audit });
+    await first.recordMemoryUse([event.id], { receiptId: 'answer:42', audit });
     expect(event.weight.mentionCount).toBe(2);
     await first.close();
 
@@ -249,7 +259,11 @@ describe('SQLite persistence', () => {
     const restoredEvent = restored.listEvents()[0];
     expect(restoredEvent?.weight.mentionCount).toBe(2);
     if (restoredEvent) {
-      await restored.recordMemoryUse([restoredEvent.id], { receiptId: 'answer:42' });
+      expect(restored.listUsageReceipts()).toContainEqual(expect.objectContaining({
+        id: 'answer:42',
+        audit,
+      }));
+      await restored.recordMemoryUse([restoredEvent.id], { receiptId: 'answer:42', audit });
       expect(restoredEvent.weight.mentionCount).toBe(2);
       await expect(restored.recordMemoryUse([], { receiptId: 'answer:42' }))
         .rejects.toThrow('different memory IDs');
@@ -312,7 +326,7 @@ describe('SQLite persistence', () => {
     const loaded = await storage.load('legacy:user');
     expect(loaded?.revision).toBe(7);
     expect(loaded?.snapshot).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       elements: [],
       elementProjectionJobs: [],
       ingestionReceipts: [],
@@ -320,9 +334,11 @@ describe('SQLite persistence', () => {
     await storage.close();
 
     const migrated = new Database(filename, { readonly: true });
-    expect(migrated.pragma('user_version', { simple: true })).toBe(3);
+    expect(migrated.pragma('user_version', { simple: true })).toBe(4);
     expect((migrated.pragma('table_info(usage_receipts)') as Array<{ name: string }>)
       .map(({ name }) => name)).toContain('element_ids_json');
+    expect((migrated.pragma('table_info(usage_receipts)') as Array<{ name: string }>)
+      .map(({ name }) => name)).toContain('audit_json');
     expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'elements'")
       .pluck().get()).toBe('elements');
     expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ingestion_receipts'")

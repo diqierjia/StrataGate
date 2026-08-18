@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   StrataGate,
   type ElementSearchOptions,
   type MemoryElementType,
+  type RetrievalAssessment,
   type RetrievalAssessmentInput,
   type SearchOptions,
+  type StrataGateSnapshot,
 } from '@diqier/stratagate'
+import { SqliteStorage } from '@diqier/stratagate/sqlite'
 import type { ResolvedConfig } from './config.js'
 import { TurnFolder } from './fold.js'
 import { DshModelBridge } from './llm.js'
@@ -15,6 +19,11 @@ import { DshModelBridge } from './llm.js'
 interface EvidenceTarget {
   eventIds: string[]
   elementIds: string[]
+}
+
+interface AdoptedEvidence extends EvidenceTarget {
+  batchId: string
+  assessment: RetrievalAssessment
 }
 
 interface RetrievalBatch {
@@ -31,7 +40,7 @@ export class StrataGateRuntime {
   private readonly folder = new TurnFolder()
   private readonly spaces = new Map<string, Promise<StrataGate>>()
   private readonly batches = new Map<string, RetrievalBatch>()
-  private readonly adopted = new Map<string, EvidenceTarget>()
+  private readonly adopted = new Map<string, AdoptedEvidence>()
   private ingestTail: Promise<void> = Promise.resolve()
   private batchSequence = 0
   private closed = false
@@ -135,7 +144,12 @@ export class StrataGateRuntime {
         for (const id of target?.eventIds ?? []) eventIds.add(id)
         for (const id of target?.elementIds ?? []) elementIds.add(id)
       }
-      this.adopted.set(key, { eventIds: [...eventIds], elementIds: [...elementIds] })
+      this.adopted.set(key, {
+        eventIds: [...eventIds],
+        elementIds: [...elementIds],
+        batchId: batch.id,
+        assessment,
+      })
     } else {
       this.adopted.delete(key)
     }
@@ -146,7 +160,20 @@ export class StrataGateRuntime {
     const key = String(session.id)
     const refs = this.adopted.get(key)
     if (!refs) throw new Error('No sufficient StrataGate evidence has been assessed for this session')
-    await (await this.space(session)).recordMemoryUse(refs, { receiptId: `dsh:${key}:tool:${receiptId}` })
+    const turn = activeTurn(session)
+    await (await this.space(session)).recordMemoryUse(refs, {
+      receiptId: `dsh:${key}:tool:${receiptId}`,
+      audit: {
+        sessionId: key,
+        ...(turn === undefined ? {} : { turn }),
+        batchId: refs.batchId,
+        evidenceRefs: refs.assessment.evidenceRefs,
+        verdict: refs.assessment.verdict,
+        fit: refs.assessment.fit,
+        missing: refs.assessment.missing,
+        nextStrategy: refs.assessment.nextStrategy,
+      },
+    })
     this.adopted.delete(key)
     return { recorded: true, eventIds: refs.eventIds, elementIds: refs.elementIds }
   }
@@ -181,6 +208,30 @@ export class StrataGateRuntime {
     return `${prefix}:project:${projectKey(session.header.cwd)}`
   }
 
+  async adminNamespaces(): Promise<string[]> {
+    await this.flush()
+    if (this.config.database === ':memory:' || !existsSync(this.config.database)) return []
+    const storage = new SqliteStorage({ filename: this.config.database, readonly: true })
+    try {
+      return storage.listNamespaces()
+    } finally {
+      await storage.close()
+    }
+  }
+
+  async adminSnapshot(namespace: string): Promise<StrataGateSnapshot | null> {
+    await this.flush()
+    const key = namespace.trim()
+    if (!key) throw new TypeError('StrataGate admin namespace must not be empty')
+    if (this.config.database === ':memory:' || !existsSync(this.config.database)) return null
+    const storage = new SqliteStorage({ filename: this.config.database, readonly: true })
+    try {
+      return (await storage.load(key))?.snapshot ?? null
+    } finally {
+      await storage.close()
+    }
+  }
+
   private space(session: Session): Promise<StrataGate> {
     const namespace = this.namespaceFor(session)
     let opening = this.spaces.get(namespace)
@@ -212,6 +263,14 @@ export class StrataGateRuntime {
     this.adopted.delete(String(session.id))
     return { batchId: id, evidenceRefs: [...refs.keys()], results }
   }
+}
+
+function activeTurn(session: Session): number | undefined {
+  for (let index = session.events.length - 1; index >= 0; index -= 1) {
+    const event = session.events[index]
+    if (event?.type === 'turn/start') return event.data.turn
+  }
+  return undefined
 }
 
 export function elementType(value: string | undefined): MemoryElementType | undefined {

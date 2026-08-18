@@ -1,6 +1,6 @@
 import type { ElementCard, EventCard, MemoryBlock, RawMessage } from './types.js';
 
-export const STRATAGATE_STORAGE_SCHEMA_VERSION = 3;
+export const STRATAGATE_STORAGE_SCHEMA_VERSION = 4;
 
 export type ExtractionJobStatus = 'running' | 'succeeded' | 'skipped' | 'failed';
 
@@ -30,7 +30,19 @@ export interface UsageReceipt {
   id: string;
   eventIds: string[];
   elementIds: string[];
+  audit?: UsageAudit;
   createdAt: string;
+}
+
+export interface UsageAudit {
+  sessionId?: string;
+  turn?: number;
+  batchId?: string;
+  evidenceRefs?: string[];
+  verdict?: 'sufficient' | 'partial' | 'wrong';
+  fit?: string;
+  missing?: string;
+  nextStrategy?: string;
 }
 
 export interface IngestionReceipt {
@@ -87,6 +99,11 @@ interface LegacySnapshotV2 extends Omit<StrataGateSnapshot, 'schemaVersion' | 'i
   schemaVersion: 2;
 }
 
+interface LegacySnapshotV3 extends Omit<StrataGateSnapshot, 'schemaVersion' | 'usageReceipts'> {
+  schemaVersion: 3;
+  usageReceipts: Array<Omit<UsageReceipt, 'audit'>>;
+}
+
 export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
   if (!value || typeof value !== 'object') throw new TypeError('Invalid StrataGate snapshot: expected an object');
   const schemaVersion = (value as { schemaVersion?: unknown }).schemaVersion;
@@ -108,6 +125,11 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
       ...structuredClone(value as LegacySnapshotV2),
       schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
       ingestionReceipts: [],
+    };
+  } else if (schemaVersion === 3) {
+    snapshot = {
+      ...structuredClone(value as LegacySnapshotV3),
+      schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
     };
   } else if (schemaVersion === STRATAGATE_STORAGE_SCHEMA_VERSION) {
     snapshot = structuredClone(value) as StrataGateSnapshot;

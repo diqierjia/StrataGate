@@ -9,7 +9,7 @@ export default defineConfig({
   clean: true,
   splitting: false,
   removeNodeProtocol: false,
-  noExternal: ['@diqier/stratagate'],
+  noExternal: [/^@diqier\/stratagate(?:\/.*)?$/],
   external: [
     /^@deepseek-ai\//,
   ],
