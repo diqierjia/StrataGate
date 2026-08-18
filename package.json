@@ -1,7 +1,7 @@
 {
   "name": "@diqier/stratagate",
   "version": "0.1.0",
-  "description": "Recent conversations stay verbatim. Older ones become an index. Answers wait for enough evidence.",
+  "description": "Layered, evidence-gated cross-session memory for AI agents with source-traceable recall",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -36,13 +36,20 @@
   },
   "keywords": [
     "agent-memory",
+    "cross-session-memory",
+    "persistent-memory",
+    "project-memory",
+    "conversation-memory",
     "layered-memory",
     "evidence-gate",
+    "source-tracing",
     "long-term-memory",
     "llm",
     "ai-agents",
     "rag",
-    "temporal-memory"
+    "temporal-memory",
+    "deepseek-harness",
+    "dsh-plugin"
   ],
   "repository": {
     "type": "git",

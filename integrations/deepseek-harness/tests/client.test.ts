@@ -27,4 +27,14 @@ describe('StrataGate Web client contract', () => {
     expect(typeof registration.render).toBe('function')
     expect(source).not.toContain("method: 'POST'")
   })
+
+  it('offers a one-time GitHub Star link only after demonstrated memory use', () => {
+    const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+    expect(source).toContain("const STAR_PROMPT_USAGE_THRESHOLD = 3")
+    expect(source).toContain("usageRecords: selected.usageReceipts")
+    expect(source).toContain("https://github.com/diqierjia/StrataGate-AgentMemory")
+    expect(source).toContain("stratagate.starPrompt.dismissed.v1")
+    expect(source).toContain("rel: 'noopener noreferrer'")
+    expect(source).not.toContain('window.open(')
+  })
 })

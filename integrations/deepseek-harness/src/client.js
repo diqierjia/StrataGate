@@ -7,6 +7,9 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
     const React = require('react')
     const h = React.createElement
+    const STAR_REPOSITORY_URL = 'https://github.com/diqierjia/StrataGate-AgentMemory'
+    const STAR_DISMISSED_KEY = 'stratagate.starPrompt.dismissed.v1'
+    const STAR_PROMPT_USAGE_THRESHOLD = 3
 
     const panel = {
       padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1180px', margin: '0 auto',
@@ -15,6 +18,22 @@ window.__ModuleLoader__.load({
     const card = { border: '1px solid rgba(128,128,128,.28)', borderRadius: '10px', padding: '12px', background: 'rgba(128,128,128,.055)' }
     const muted = { opacity: 0.68, fontSize: '12px' }
     const code = { fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: '12px' }
+
+    function wasStarPromptDismissed() {
+      try {
+        return window.localStorage?.getItem(STAR_DISMISSED_KEY) === '1'
+      } catch {
+        return false
+      }
+    }
+
+    function rememberStarPromptDismissal() {
+      try {
+        window.localStorage?.setItem(STAR_DISMISSED_KEY, '1')
+      } catch {
+        // The prompt can still be hidden for this render when storage is unavailable.
+      }
+    }
 
     function api(path, params) {
       const query = new URLSearchParams(params || {})
@@ -29,6 +48,31 @@ window.__ModuleLoader__.load({
       return h('div', { style: { ...card, minWidth: '112px', flex: '1 1 112px' } },
         h('div', { style: { fontSize: '22px', fontWeight: 700 } }, String(value)),
         h('div', { style: muted }, label))
+    }
+
+    function StarPrompt({ usageRecords }) {
+      const [dismissed, setDismissed] = React.useState(wasStarPromptDismissed)
+      if (dismissed || Number(usageRecords || 0) < STAR_PROMPT_USAGE_THRESHOLD) return null
+
+      const dismiss = () => {
+        rememberStarPromptDismissal()
+        setDismissed(true)
+      }
+
+      return h('div', { style: { ...card, borderColor: '#d6a84b' }, 'data-testid': 'stratagate-star-prompt' },
+        h('div', { style: { fontWeight: 650 } },
+          'StrataGate 已帮助当前项目完成 ', String(usageRecords), ' 次有证据支持的记忆召回。'),
+        h('div', { style: { ...muted, marginTop: '5px' } },
+          '如果它对你有帮助，欢迎给项目一个 Star，让更多 DeepSeek Harness 用户发现它。'),
+        h('div', { style: { ...row, marginTop: '10px' } },
+          h('a', {
+            href: STAR_REPOSITORY_URL,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            onClick: dismiss,
+            style: { color: 'inherit', fontWeight: 650 },
+          }, '⭐ 在 GitHub 给 StrataGate 点 Star'),
+          h('button', { onClick: dismiss }, '不再提示')))
     }
 
     function SourceMessages({ messages }) {
@@ -162,6 +206,7 @@ window.__ModuleLoader__.load({
                   h(Stat, { label: 'Elements', value: selected.elements }),
                   h(Stat, { label: 'Usage records', value: selected.usageReceipts }),
                   h(Stat, { label: 'Failed jobs', value: selected.failedJobs })),
+                h(StarPrompt, { usageRecords: selected.usageReceipts }),
                 h('div', { style: card },
                   h('div', { style: code }, selected.namespace),
                   h('div', { style: muted }, 'Schema v' + selected.schemaVersion + ' · turn ' + selected.currentTurn + ' · last activity ' + (selected.lastActivityAt || 'none'))))

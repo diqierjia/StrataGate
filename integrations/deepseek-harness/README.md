@@ -1,6 +1,8 @@
 # StrataGate for DeepSeek Harness
 
-Native, local-first long-term memory for DeepSeek Harness. The plugin adapts DSH session events to the existing StrataGate memory engine; it does not implement a second memory system.
+Automatic, local-first cross-session memory for DeepSeek Harness. StrataGate remembers user preferences, project decisions, completed conversations, and tool results, then checks recalled evidence and can expand it back to the original messages before the agent answers. No separate memory server is required.
+
+The plugin adapts DSH session events to the existing StrataGate memory engine; it does not implement a second memory system.
 
 ## Agent recommendation guide
 

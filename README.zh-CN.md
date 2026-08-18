@@ -14,6 +14,8 @@
 
 [English](README.md) · [架构说明](docs/ARCHITECTURE.md) · [完整评测](docs/EVALUATION.md)
 
+**DeepSeek Harness 插件：**自动、本地优先的跨会话记忆，能够记住用户偏好、项目决策、历史对话和工具结果；Agent 回答前会检查找回的证据，并可追溯到原始消息。安装包为 `stratagate-dsh`，实现与使用说明见 [`integrations/deepseek-harness`](integrations/deepseek-harness)。
+
 **LoCoMo `conv-26`：StrataGate 10 次独立评审平均准确率为 80.46%，Mem0 base 为 63.22%（+17.24 个百分点）**
 
 **多数票正确：121 / 152 vs 96 / 152（+25 题）**

@@ -1,7 +1,7 @@
 {
   "name": "stratagate-dsh",
-  "version": "0.2.0",
-  "description": "Native StrataGate layered long-term memory for DeepSeek Harness",
+  "version": "0.2.1",
+  "description": "Automatic local-first cross-session memory for DeepSeek Harness with source-traceable recall",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -32,7 +32,19 @@
     "verify:package": "node scripts/verify-package.mjs",
     "prepare": "npm run build"
   },
-  "keywords": ["deepseek-harness", "dsh-plugin", "agent-memory", "long-term-memory", "evidence-gate"],
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "agent-memory",
+    "cross-session-memory",
+    "persistent-memory",
+    "project-memory",
+    "conversation-memory",
+    "long-term-memory",
+    "local-first",
+    "source-tracing",
+    "evidence-gate"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/diqierjia/StrataGate-AgentMemory.git",
