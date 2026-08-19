@@ -80,6 +80,15 @@ export interface TurnInput {
   receiptId?: string;
 }
 
+export interface AppendTurnOptions {
+  /**
+   * Persist the raw turn and its ingestion receipt without sealing blocks or
+   * running model-backed derivation. A separate worker can later call
+   * resumePendingWork(). This keeps host lifecycle hooks short and crash-safe.
+   */
+  deferProcessing?: boolean;
+}
+
 export interface BlockContextEntry {
   id: string;
   turnRange: [number, number];
@@ -331,7 +340,7 @@ export class StrataGate {
     return this.ingestionReceipts.has(receiptId.trim());
   }
 
-  async appendTurn(input: TurnInput): Promise<AppendTurnResult> {
+  async appendTurn(input: TurnInput, options: AppendTurnOptions = {}): Promise<AppendTurnResult> {
     const receiptId = input.receiptId?.trim();
     if (input.receiptId !== undefined && !receiptId) {
       throw new TypeError('Turn receiptId must not be empty');
@@ -359,6 +368,9 @@ export class StrataGate {
       return true;
     });
     if (!appended) return { sealedBlock: null, extractedEvents: [], projectedElements: [] };
+    if (options.deferProcessing === true) {
+      return { sealedBlock: null, extractedEvents: [], projectedElements: [] };
+    }
 
     if (this.openTail.filter((message) => message.role === 'user').length < this.blockTurnSize) {
       const projectedElements = await this.projectEligibleElements() ?? [];

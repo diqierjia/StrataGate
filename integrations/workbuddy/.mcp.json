@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "stratagate": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CODEBUDDY_PLUGIN_ROOT}/dist/server.cjs"],
+      "cwd": "${CODEBUDDY_PLUGIN_ROOT}",
+      "env": {
+        "STRATAGATE_DATA_DIR": "${CODEBUDDY_PLUGIN_DATA}",
+        "STRATAGATE_PROJECT_DIR": "${CODEBUDDY_PROJECT_DIR}"
+      }
+    }
+  }
+}

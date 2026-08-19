@@ -1,0 +1,23 @@
+{
+  "name": "stratagate-memory",
+  "version": "0.1.0",
+  "description": "Zero-config local-first WorkBuddy memory using the built-in lite model, with L0-L5 source layers, evidence-gated recall, and adoption-only reinforcement.",
+  "author": {
+    "name": "diqier"
+  },
+  "homepage": "https://github.com/diqierjia/StrataGate-AgentMemory/tree/main/integrations/workbuddy",
+  "repository": "https://github.com/diqierjia/StrataGate-AgentMemory",
+  "license": "MIT",
+  "keywords": [
+    "agent-memory",
+    "cross-session-memory",
+    "local-first",
+    "source-tracing",
+    "evidence-gate",
+    "mcp"
+  ],
+  "category": "productivity",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "skills": ["./skills/"]
+}

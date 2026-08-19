@@ -26,11 +26,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:dsh": "npm run build --workspace stratagate-dsh",
+    "build:workbuddy": "npm run build --workspace stratagate-workbuddy",
     "check": "tsc -p tsconfig.json --noEmit",
     "check:dsh": "npm run check --workspace stratagate-dsh",
+    "check:workbuddy": "npm run check --workspace stratagate-workbuddy",
     "test": "vitest run",
     "test:dsh": "npm run test --workspace stratagate-dsh",
+    "test:workbuddy": "npm run test --workspace stratagate-workbuddy",
     "verify:dsh": "npm run verify:package --workspace stratagate-dsh",
+    "verify:workbuddy": "npm run verify:package --workspace stratagate-workbuddy",
     "test:watch": "vitest",
     "prepare": "npm run build"
   },

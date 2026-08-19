@@ -5,6 +5,23 @@ import { describe, expect, it } from 'vitest'
 import { StrataGate } from '../src/index.js'
 
 describe('turn ingestion receipts', () => {
+  it('can defer sealing and derivation for a host lifecycle hook', async () => {
+    const memory = StrataGate.inMemory({ blockTurnSize: 1 })
+    const appended = await memory.appendTurn(
+      { user: 'Remember the release decision.', assistant: 'Recorded.', receiptId: 'workbuddy:s1:offset:42' },
+      { deferProcessing: true },
+    )
+
+    expect(appended).toEqual({ sealedBlock: null, extractedEvents: [], projectedElements: [] })
+    expect(memory.listOpenTail()).toHaveLength(2)
+    expect(memory.listBlocks()).toHaveLength(0)
+
+    const resumed = await memory.resumePendingWork()
+    expect(resumed.sealedBlocks).toHaveLength(1)
+    expect(memory.listOpenTail()).toHaveLength(0)
+    expect(memory.listBlocks()).toHaveLength(1)
+  })
+
   it('does not append the same external turn twice in memory', async () => {
     const memory = StrataGate.inMemory()
     await memory.appendTurn({ user: 'one', assistant: 'answer', receiptId: 'external:1' })

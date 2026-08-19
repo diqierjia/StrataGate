@@ -1,0 +1,61 @@
+{
+  "name": "stratagate-workbuddy",
+  "version": "0.1.0",
+  "description": "Automatic local-first, source-traceable memory for WorkBuddy Desktop",
+  "type": "module",
+  "main": "./dist/server.cjs",
+  "bin": {
+    "stratagate-workbuddy-mcp": "./dist/server.cjs",
+    "stratagate-workbuddy-hook": "./dist/hook.cjs"
+  },
+  "files": [
+    "dist",
+    ".codebuddy-plugin",
+    ".mcp.json",
+    "hooks",
+    "skills",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "verify:package": "npm run build && node scripts/verify-package.mjs",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "workbuddy",
+    "codebuddy",
+    "mcp",
+    "agent-memory",
+    "cross-session-memory",
+    "persistent-memory",
+    "local-first",
+    "source-tracing",
+    "evidence-gate"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diqierjia/StrataGate-AgentMemory.git",
+    "directory": "integrations/workbuddy"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.5",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^12.11.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0"
+  }
+}

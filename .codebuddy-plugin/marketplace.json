@@ -1,0 +1,28 @@
+{
+  "name": "stratagate-plugins",
+  "owner": {
+    "name": "diqier"
+  },
+  "description": "Official StrataGate integrations for source-traceable long-term agent memory.",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "stratagate-memory",
+      "source": {
+        "source": "npm",
+        "package": "stratagate-workbuddy",
+        "versionConstraint": "0.1.0"
+      },
+      "description": "Zero-config local-first WorkBuddy memory using the built-in lite model, with L0-L5 source layers, evidence-gated recall, and adoption records.",
+      "version": "0.1.0",
+      "author": {
+        "name": "diqier"
+      },
+      "homepage": "https://github.com/diqierjia/StrataGate-AgentMemory/tree/main/integrations/workbuddy",
+      "repository": "https://github.com/diqierjia/StrataGate-AgentMemory",
+      "license": "MIT",
+      "keywords": ["memory", "agent-memory", "workbuddy", "mcp", "local-first"],
+      "category": "productivity"
+    }
+  ]
+}
